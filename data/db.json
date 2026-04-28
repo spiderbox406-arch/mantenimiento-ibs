@@ -1,0 +1,15 @@
+{
+  "config": {
+    "whatsappGerente": "",
+    "whatsappTecnicos": {}
+  },
+  "users": [
+    { "username": "admin", "password": "1234", "role": "admin", "name": "Administrador" },
+    { "username": "operaciones", "password": "1234", "role": "operaciones", "name": "Operaciones" },
+    { "username": "gerente", "password": "1234", "role": "gerente", "name": "Gerente MTTO" },
+    { "username": "juan", "password": "1234", "role": "tecnico", "name": "Juan" },
+    { "username": "carlos", "password": "1234", "role": "tecnico", "name": "Carlos" }
+  ],
+  "equipos": [],
+  "tickets": []
+}
