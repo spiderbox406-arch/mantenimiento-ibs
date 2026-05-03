@@ -11,7 +11,7 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-if (!process.env.DATABASE_URL) { console.error('Falta DATABASE_URL. Configúralo en Render/Neon.'); process.exit(1); }
+if (!process.env.DATABASE_URL) console.warn('Falta DATABASE_URL. Configúralo en Render/Neon.');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -24,7 +24,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  store: new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
+  store: new PgSession({ pool, tableName: 'session' }),
   name: 'ibs_sid',
   secret: process.env.SESSION_SECRET || 'dev_secret_cambiar',
   resave: false,
@@ -138,20 +138,91 @@ async function initDb(){
       created_at timestamptz not null default now()
     );
   `);
+
+  // Migraciones seguras para bases Neon ya existentes
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS numero_empleado text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'operaciones';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'activo';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS area_asignada text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS sucursal text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS telefono text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS correo text;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts int NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until timestamptz;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS ubicacion text;
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS marca text;
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS modelo text;
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS usuario text;
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS estatus text;
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS search_text text;
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+    ALTER TABLE activos ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS activo text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS activo_descripcion text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS area text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sucursal text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ubicacion text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS solicitante text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS empleado_solicitante text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS telefono_solicitante text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS falla text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS prioridad text DEFAULT 'Normal';
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo_falla text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS estado text NOT NULL DEFAULT 'Reportado';
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tecnico_username text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS diagnostico text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS solucion text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS creado timestamptz NOT NULL DEFAULT now();
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS asignado timestamptz;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS iniciado timestamptz;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS terminado timestamptz;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS liberado timestamptz;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS mtto_min int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS produccion_min int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_by bigint;
+
+    CREATE TABLE IF NOT EXISTS user_activity_log(
+      id bigserial primary key,
+      user_id bigint,
+      action text not null,
+      details jsonb default '{}'::jsonb,
+      created_at timestamptz not null default now()
+    );
+  `);
+
   const c = await pool.query('select count(*)::int as n from users');
   if(c.rows[0].n === 0){
     const hash = await bcrypt.hash('1234', 12);
     await pool.query(`insert into users(name, username, password_hash, role, status, must_change_password) values($1,$2,$3,$4,$5,$6)`, ['Administrador IBS','admin',hash,'admin','activo',true]);
     console.log('Usuario inicial creado: admin / 1234');
   } else {
-    const admin = await pool.query("select id, must_change_password from users where lower(username)='admin' limit 1");
-    if(admin.rows[0]?.must_change_password){
+    const admin = await pool.query("select id, must_change_password, password_hash from users where lower(username)='admin' limit 1");
+    if(admin.rows[0] && (!admin.rows[0].password_hash || admin.rows[0].must_change_password)){
       const hash = await bcrypt.hash('1234', 12);
-      await pool.query("update users set password_hash=$1, status='activo', role='admin', updated_at=now() where id=$2", [hash, admin.rows[0].id]);
+      await pool.query("update users set password_hash=$1, status='activo', role='admin', must_change_password=true, updated_at=now() where id=$2", [hash, admin.rows[0].id]);
       console.log('Admin inicial actualizado: admin / 1234');
     }
   }
 }
+
+
+app.get('/api/health', async (req,res)=>{
+  try{
+    const r = await pool.query('select now() as hora');
+    res.json({ok:true, db:'Neon conectado', hora:r.rows[0].hora});
+  }catch(e){
+    res.status(500).json({ok:false, error:e.message});
+  }
+});
 
 app.get('/api/me', (req,res)=> res.json({user:req.session.user || null}));
 app.post('/api/login', async (req,res)=>{
