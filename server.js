@@ -1,635 +1,331 @@
-
-const express = require("express");
-const path = require("path");
-const multer = require("multer");
-const XLSX = require("xlsx");
-const { Pool } = require("pg");
+require('dotenv').config();
+const express = require('express');
+const session = require('express-session');
+const PgSession = require('connect-pg-simple')(session);
+const helmet = require('helmet');
+const multer = require('multer');
+const XLSX = require('xlsx');
+const bcrypt = require('bcryptjs');
+const { Pool } = require('pg');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-if (!process.env.DATABASE_URL) {
-  console.error("FALTA DATABASE_URL en Render > Ambiente");
-  process.exit(1);
-}
+if (!process.env.DATABASE_URL) console.warn('Falta DATABASE_URL. Configúralo en Render/Neon.');
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
+  ssl: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') ? { rejectUnauthorized: false } : false
 });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
-const uploadExcel = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 12 * 1024 * 1024 }
-});
-
-app.use(express.json({ limit: "25mb" }));
+app.set('trust proxy', 1);
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(session({
+  store: new PgSession({ pool, tableName: 'session' }),
+  name: 'ibs_sid',
+  secret: process.env.SESSION_SECRET || 'dev_secret_cambiar',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 8 }
+}));
+app.use(express.static(path.join(__dirname, 'public')));
 
-function nowISO() {
-  return new Date().toISOString();
+function clean(v){ return String(v ?? '').trim(); }
+function norm(v){ return clean(v).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function requireLogin(req,res,next){ if(!req.session.user) return res.status(401).json({error:'Sesión vencida. Inicia sesión otra vez.'}); next(); }
+function requireAdmin(req,res,next){ if(!req.session.user || req.session.user.role !== 'admin') return res.status(403).json({error:'Solo administrador.'}); next(); }
+function publicUser(u){ if(!u) return null; const { password_hash, failed_login_attempts, ...safe } = u; return safe; }
+async function logAction(userId, action, details = {}){
+  try { await pool.query('insert into user_activity_log(user_id, action, details) values($1,$2,$3)', [userId || null, action, JSON.stringify(details)]); } catch(e){ console.error('logAction', e.message); }
 }
 
-function makeTicketId() {
-  return "MTTO-" + Date.now().toString().slice(-9);
-}
-
-function minDiff(a, b) {
-  if (!a || !b) return 0;
-  const v = Math.round((new Date(b) - new Date(a)) / 60000);
-  return Math.max(0, v);
-}
-
-function clean(v) {
-  return String(v ?? "").trim();
-}
-
-function lowerClean(v) {
-  return clean(v).toLowerCase();
-}
-
-function normalizeRole(role) {
-  const r = lowerClean(role);
-  if (["admin", "administrador"].includes(r)) return "admin";
-  if (["gerente", "supervisor", "jefe"].includes(r)) return "gerente";
-  if (["operaciones", "produccion", "producción"].includes(r)) return "operaciones";
-  if (["tecnico", "técnico", "mantenimiento", "mtto"].includes(r)) return "tecnico";
-  return "operaciones";
-}
-
-function getCell(row, names) {
-  for (const name of names) {
-    if (row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== "") return row[name];
-  }
-  const keys = Object.keys(row);
-  for (const name of names) {
-    const wanted = lowerClean(name).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    const found = keys.find(k => lowerClean(k).normalize("NFD").replace(/[\u0300-\u036f]/g, "") === wanted);
-    if (found && row[found] !== undefined && row[found] !== null && String(row[found]).trim() !== "") return row[found];
-  }
-  return "";
-}
-
-function ticketTimes(t) {
-  const current = nowISO();
-  const creado = t.creado;
-  const asignado = t.asignado || (t.estado === "Reportado" ? current : null);
-  const inicio = t.inicio || (t.estado === "Asignado" ? current : null);
-  const finTecnico = t.fin_tecnico || (t.estado === "En atención" ? current : null);
-  const liberado = t.liberado || (t.estado === "Pendiente validación" ? current : null);
-
-  const esperaAsignacionMin = minDiff(creado, asignado);
-  const esperaAtencionMin = minDiff(t.asignado, inicio);
-  const reparacionMin = minDiff(t.inicio, finTecnico);
-  const esperaLiberacionMin = minDiff(t.fin_tecnico, liberado);
-  const muertoTotalMin = minDiff(t.creado, t.liberado || current);
-
-  return {
-    esperaAsignacionMin,
-    esperaAtencionMin,
-    reparacionMin,
-    esperaLiberacionMin,
-    mttoMin: esperaAsignacionMin + esperaAtencionMin + reparacionMin,
-    produccionMin: esperaLiberacionMin,
-    muertoTotalMin
-  };
-}
-
-function responsableActual(estado) {
-  if (estado === "Reportado") return "MTTO / Gerencia: pendiente asignación";
-  if (estado === "Asignado") return "Técnico: pendiente iniciar";
-  if (estado === "En atención") return "MTTO: reparación en proceso";
-  if (estado === "Pendiente validación") return "Producción / Operaciones: pendiente liberar";
-  if (estado === "Devuelto") return "MTTO: devuelto por producción";
-  if (estado === "Liberado") return "Cerrado";
-  return "";
-}
-
-function ticketOut(row) {
-  if (!row) return null;
-  const t = {
-    id: row.id,
-    activo: row.activo,
-    activo_descripcion: row.activo_descripcion,
-    area: row.area,
-    sucursal: row.sucursal,
-    solicitante: row.solicitante,
-    empleado_solicitante: row.empleado_solicitante,
-    telefono_solicitante: row.telefono_solicitante,
-    falla: row.falla,
-    prioridad: row.prioridad,
-    tipo_falla: row.tipo_falla,
-    estado: row.estado,
-    tecnico_username: row.tecnico_username,
-    tecnico_nombre: row.tecnico_nombre,
-    diagnostico: row.diagnostico,
-    solucion: row.solucion,
-    creado: row.creado,
-    asignado: row.asignado,
-    inicio: row.inicio,
-    fin_tecnico: row.fin_tecnico,
-    liberado: row.liberado,
-    historial: row.historial || []
-  };
-  return {
-    ...t,
-    tiempos: ticketTimes(row),
-    responsableActual: responsableActual(row.estado)
-  };
-}
-
-async function initDB() {
+async function initDb(){
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS empleados (
-      id SERIAL PRIMARY KEY,
-      numero_empleado TEXT UNIQUE,
-      username TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      role TEXT NOT NULL,
-      name TEXT NOT NULL,
-      sucursal TEXT DEFAULT '',
-      area_asignada TEXT DEFAULT '',
-      telefono TEXT DEFAULT '',
-      correo TEXT DEFAULT '',
-      activo BOOLEAN DEFAULT true
+    create table if not exists users(
+      id bigserial primary key,
+      numero_empleado text,
+      name text not null,
+      username text not null unique,
+      password_hash text not null,
+      role text not null default 'operaciones',
+      status text not null default 'activo',
+      must_change_password boolean not null default false,
+      area_asignada text,
+      sucursal text,
+      telefono text,
+      correo text,
+      failed_login_attempts int not null default 0,
+      locked_until timestamptz,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
     );
-
-    CREATE TABLE IF NOT EXISTS activos (
-      id SERIAL PRIMARY KEY,
-      numero TEXT UNIQUE NOT NULL,
-      descripcion TEXT NOT NULL,
-      area TEXT DEFAULT '',
-      tipo TEXT DEFAULT 'Equipo',
-      sucursal TEXT DEFAULT '',
-      ubicacion TEXT DEFAULT '',
-      marca TEXT DEFAULT '',
-      modelo TEXT DEFAULT '',
-      serie TEXT DEFAULT '',
-      estado TEXT DEFAULT 'Activo'
+    create table if not exists activos(
+      id bigserial primary key,
+      numero text not null unique,
+      descripcion text not null,
+      area text,
+      tipo text,
+      sucursal text,
+      ubicacion text,
+      marca text,
+      modelo text,
+      usuario text,
+      estatus text,
+      search_text text,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
     );
-
-    CREATE TABLE IF NOT EXISTS tickets (
-      id TEXT PRIMARY KEY,
-      activo TEXT DEFAULT '',
-      activo_descripcion TEXT DEFAULT '',
-      area TEXT DEFAULT '',
-      sucursal TEXT DEFAULT '',
-      solicitante TEXT DEFAULT '',
-      empleado_solicitante TEXT DEFAULT '',
-      telefono_solicitante TEXT DEFAULT '',
-      falla TEXT DEFAULT '',
-      prioridad TEXT DEFAULT 'Normal',
-      tipo_falla TEXT DEFAULT '',
-      estado TEXT DEFAULT 'Reportado',
-      tecnico_username TEXT DEFAULT '',
-      tecnico_nombre TEXT DEFAULT '',
-      diagnostico TEXT DEFAULT '',
-      solucion TEXT DEFAULT '',
-      creado TIMESTAMPTZ DEFAULT NOW(),
-      asignado TIMESTAMPTZ,
-      inicio TIMESTAMPTZ,
-      fin_tecnico TIMESTAMPTZ,
-      liberado TIMESTAMPTZ,
-      historial JSONB DEFAULT '[]'::jsonb
+    create table if not exists tickets(
+      id bigserial primary key,
+      activo text,
+      activo_descripcion text,
+      area text,
+      sucursal text,
+      ubicacion text,
+      solicitante text,
+      empleado_solicitante text,
+      telefono_solicitante text,
+      falla text not null,
+      prioridad text default 'Normal',
+      tipo_falla text,
+      estado text not null default 'Reportado',
+      tecnico_username text,
+      diagnostico text,
+      solucion text,
+      creado timestamptz not null default now(),
+      asignado timestamptz,
+      iniciado timestamptz,
+      terminado timestamptz,
+      liberado timestamptz,
+      mtto_min int default 0,
+      produccion_min int default 0,
+      created_by bigint references users(id)
+    );
+    create table if not exists user_activity_log(
+      id bigserial primary key,
+      user_id bigint references users(id),
+      action text not null,
+      details jsonb default '{}'::jsonb,
+      created_at timestamptz not null default now()
     );
   `);
-
-  await pool.query(`
-    INSERT INTO empleados (username,password,role,name)
-    VALUES
-      ('admin','1234','admin','Administrador'),
-      ('operaciones','1234','operaciones','Operaciones'),
-      ('gerente','1234','gerente','Gerente MTTO'),
-      ('juan','1234','tecnico','Juan'),
-      ('carlos','1234','tecnico','Carlos')
-    ON CONFLICT (username) DO NOTHING
-  `);
-
-  await pool.query(`
-    INSERT INTO activos (numero,descripcion,area,tipo,sucursal)
-    VALUES
-      ('COST-01','Máquina de costura 1','Producción','Máquina',''),
-      ('GRAP-01','Grapadora Flexco 36 pulgadas','Producción','Máquina',''),
-      ('VUL-900','Prensa Beltwin 900','Producción','Máquina',''),
-      ('CORTE-CNC','CNC DCS2500','Producción','Máquina','')
-    ON CONFLICT (numero) DO NOTHING
-  `);
+  const c = await pool.query('select count(*)::int as n from users');
+  if(c.rows[0].n === 0){
+    const hash = await bcrypt.hash('admin1234', 12);
+    await pool.query(`insert into users(name, username, password_hash, role, status, must_change_password) values($1,$2,$3,$4,$5,$6)`, ['Administrador IBS','admin',hash,'admin','activo',true]);
+    console.log('Usuario inicial creado: admin / admin1234');
+  }
 }
 
-app.get("/api/health", async (req, res) => {
-  try {
-    const r = await pool.query("SELECT NOW() AS hora");
-    res.json({ ok: true, db: "Neon conectado", hora: r.rows[0].hora });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
+app.get('/api/me', (req,res)=> res.json({user:req.session.user || null}));
+app.post('/api/login', async (req,res)=>{
+  const username = clean(req.body.username).toLowerCase();
+  const password = String(req.body.password || '');
+  if(!username || !password) return res.status(400).json({error:'Usuario y contraseña son obligatorios.'});
+  const r = await pool.query('select * from users where lower(username)=lower($1)', [username]);
+  const user = r.rows[0];
+  if(!user) return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
+  if(user.status !== 'activo') return res.status(403).json({error:'Usuario inactivo. Contacta al administrador.'});
+  if(user.locked_until && new Date(user.locked_until) > new Date()) return res.status(423).json({error:'Usuario bloqueado temporalmente por intentos fallidos.'});
+  const ok = await bcrypt.compare(password, user.password_hash);
+  if(!ok){
+    const attempts = (user.failed_login_attempts || 0) + 1;
+    const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15*60*1000) : null;
+    await pool.query('update users set failed_login_attempts=$1, locked_until=$2 where id=$3', [attempts, lockedUntil, user.id]);
+    return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
   }
+  await pool.query('update users set failed_login_attempts=0, locked_until=null where id=$1', [user.id]);
+  req.session.user = publicUser(user);
+  await logAction(user.id, 'login', {username});
+  res.json({user:req.session.user});
+});
+app.post('/api/logout', requireLogin, async (req,res)=>{ const uid=req.session.user.id; req.session.destroy(()=>{}); await logAction(uid,'logout'); res.json({ok:true}); });
+app.post('/api/change-password', requireLogin, async (req,res)=>{
+  const oldPassword = String(req.body.oldPassword || '');
+  const newPassword = String(req.body.newPassword || '');
+  if(newPassword.length < 6) return res.status(400).json({error:'La nueva contraseña debe tener mínimo 6 caracteres.'});
+  const r = await pool.query('select * from users where id=$1', [req.session.user.id]);
+  const user = r.rows[0];
+  const ok = await bcrypt.compare(oldPassword, user.password_hash);
+  if(!ok) return res.status(401).json({error:'La contraseña actual no coincide.'});
+  const hash = await bcrypt.hash(newPassword, 12);
+  await pool.query('update users set password_hash=$1, must_change_password=false, updated_at=now() where id=$2', [hash, user.id]);
+  req.session.user.must_change_password = false;
+  await logAction(user.id, 'change_password');
+  res.json({ok:true});
 });
 
-app.post("/api/login", async (req, res) => {
-  const { username, password } = req.body;
-  const r = await pool.query(
-    `SELECT id, numero_empleado, username, role, name, sucursal, area_asignada, telefono, correo
-     FROM empleados
-     WHERE username=$1 AND password=$2 AND activo=true`,
-    [username, password]
-  );
-
-  if (!r.rows.length) return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
-  res.json({ user: r.rows[0] });
+app.get('/api/bootstrap', requireLogin, async (req,res)=>{
+  const [a,e,t] = await Promise.all([
+    pool.query('select * from activos order by numero limit 5000'),
+    pool.query('select id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo, created_at, updated_at from users order by name limit 2000'),
+    pool.query("select id, name, username from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by name")
+  ]);
+  res.json({activos:a.rows, empleados:e.rows, tecnicos:t.rows});
 });
 
-app.get("/api/bootstrap", async (req, res) => {
-  const empleados = await pool.query(`SELECT id, numero_empleado, username, role, name, sucursal, area_asignada, telefono, correo, activo FROM empleados ORDER BY name`);
-  const activos = await pool.query(`SELECT * FROM activos ORDER BY numero`);
-  const tecnicos = empleados.rows.filter(e => e.role === "tecnico" && e.activo);
-  res.json({ empleados: empleados.rows, usuarios: empleados.rows, tecnicos, activos: activos.rows, equipos: activos.rows });
-});
-
-app.get("/api/activos", async (req, res) => {
-  const r = await pool.query("SELECT * FROM activos ORDER BY numero");
+app.get('/api/activos', requireLogin, async (req,res)=>{
+  const q = norm(req.query.q || '');
+  const params = [];
+  let where = '';
+  if(q){ params.push('%' + q + '%'); where = 'where search_text like $1'; }
+  const r = await pool.query(`select * from activos ${where} order by numero limit 1000`, params);
   res.json(r.rows);
 });
-
-app.post("/api/activos", async (req, res) => {
-  const { numero, descripcion, area, tipo, sucursal, ubicacion, marca, modelo, serie, estado } = req.body;
-  if (!numero || !descripcion) return res.status(400).json({ error: "Falta número o descripción" });
-
-  try {
-    await pool.query(
-      `INSERT INTO activos (numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,serie,estado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [numero, descripcion, area || "", tipo || "Equipo", sucursal || "", ubicacion || "", marca || "", modelo || "", serie || "", estado || "Activo"]
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    if (err.code === "23505") return res.status(400).json({ error: "Activo ya existe" });
-    res.status(500).json({ error: err.message });
-  }
+app.post('/api/activos', requireLogin, async (req,res)=>{
+  const a = req.body;
+  if(!clean(a.numero) || !clean(a.descripcion)) return res.status(400).json({error:'Número y descripción son obligatorios.'});
+  const search = norm([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
+  const r = await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    on conflict(numero) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()
+    returning *`, [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
+  await logAction(req.session.user.id, 'upsert_asset', {numero:a.numero});
+  res.json(r.rows[0]);
 });
 
-app.get("/api/empleados", async (req, res) => {
-  const r = await pool.query("SELECT id, numero_empleado, username, role, name, sucursal, area_asignada, telefono, correo, activo FROM empleados ORDER BY name");
+app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (req,res)=>{
+  if(!req.file) return res.status(400).json({error:'Sube un archivo Excel.'});
+  const wb = XLSX.read(req.file.buffer, { type:'buffer' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
+  let agregados=0, actualizados=0, omitidos=0;
+  for(const row of rows){
+    const a = {
+      numero: row['NUM ACTIVO'] ?? row['numero'] ?? row['NUMERO'] ?? row['No ACTIVO'],
+      descripcion: row['DESCRIPCION'] ?? row['DESCRIPCIÓN'] ?? row['descripcion'],
+      area: row['AREA'] ?? row['area'],
+      tipo: row['TIPO'] ?? row['tipo'],
+      sucursal: row['SUCURSAL'] ?? row['sucursal'],
+      ubicacion: row['UBICACION'] ?? row['UBICACIÓN'] ?? row['ubicacion'],
+      marca: row['MARCA'] ?? row['marca'],
+      modelo: row['MODELO'] ?? row['modelo'],
+      usuario: row['USUARIO'] ?? row['usuario'],
+      estatus: row['ESTATUS'] ?? row['ESTADO'] ?? row['estatus']
+    };
+    if(!clean(a.numero) || !clean(a.descripcion)){ omitidos++; continue; }
+    const search = norm([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
+    const exists = await pool.query('select id from activos where numero=$1', [clean(a.numero)]);
+    await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      on conflict(numero) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()`,
+      [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus),search]);
+    exists.rows.length ? actualizados++ : agregados++;
+  }
+  await logAction(req.session.user.id, 'import_assets', {agregados,actualizados,omitidos});
+  res.json({agregados,actualizados,omitidos,total:rows.length});
+});
+
+app.get('/api/users', requireAdmin, async (req,res)=>{
+  const q = norm(req.query.q || '');
+  let params=[], where='';
+  if(q){ params.push('%'+q+'%'); where = `where upper(coalesce(numero_empleado,'')||' '||coalesce(name,'')||' '||coalesce(username,'')||' '||coalesce(role,'')||' '||coalesce(area_asignada,'')||' '||coalesce(sucursal,'')||' '||coalesce(status,'')) like $1`; }
+  const r = await pool.query(`select id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo, created_at, updated_at from users ${where} order by name`, params);
   res.json(r.rows);
 });
-
-app.post("/api/empleados", async (req, res) => {
-  const { numero_empleado, username, password, role, name, sucursal, area_asignada, telefono, correo } = req.body;
-  if (!username || !name) return res.status(400).json({ error: "Falta usuario o nombre" });
-
-  try {
-    await pool.query(
-      `INSERT INTO empleados (numero_empleado,username,password,role,name,sucursal,area_asignada,telefono,correo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [numero_empleado || "", username, password || "1234", normalizeRole(role), name, sucursal || "", area_asignada || "", telefono || "", correo || ""]
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    if (err.code === "23505") return res.status(400).json({ error: "Empleado o usuario ya existe" });
-    res.status(500).json({ error: err.message });
-  }
+app.post('/api/users', requireAdmin, async (req,res)=>{
+  const u=req.body; const pass=String(u.password || 'Temp1234');
+  if(!clean(u.username) || !clean(u.name)) return res.status(400).json({error:'Usuario y nombre son obligatorios.'});
+  const hash=await bcrypt.hash(pass,12);
+  const r=await pool.query(`insert into users(numero_empleado,name,username,password_hash,role,status,must_change_password,area_asignada,sucursal,telefono,correo)
+    values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9) returning id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo`,
+    [clean(u.numero_empleado),clean(u.name),clean(u.username),hash,clean(u.role||'operaciones'),clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo)]);
+  await logAction(req.session.user.id, 'create_user', {username:u.username});
+  res.json(r.rows[0]);
 });
-
-app.get("/api/tickets", async (req, res) => {
-  const r = await pool.query("SELECT * FROM tickets ORDER BY creado DESC");
-  res.json(r.rows.map(ticketOut));
+app.put('/api/users/:id', requireAdmin, async (req,res)=>{
+  const u=req.body;
+  const r=await pool.query(`update users set numero_empleado=$1,name=$2,username=lower($3),role=$4,status=$5,area_asignada=$6,sucursal=$7,telefono=$8,correo=$9,updated_at=now() where id=$10 returning id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo`,
+    [clean(u.numero_empleado),clean(u.name),clean(u.username),clean(u.role),clean(u.status),clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo),req.params.id]);
+  await logAction(req.session.user.id, 'update_user', {id:req.params.id});
+  res.json(r.rows[0]);
 });
-
-app.post("/api/tickets", async (req, res) => {
-  const {
-    activo, activo_descripcion, area, sucursal, solicitante, empleado_solicitante,
-    telefono_solicitante, falla, prioridad, tipo_falla
-  } = req.body;
-
-  const id = makeTicketId();
-  const historial = [{ fecha: nowISO(), evento: "Ticket creado" }];
-
-  await pool.query(
-    `INSERT INTO tickets (
-      id, activo, activo_descripcion, area, sucursal, solicitante, empleado_solicitante,
-      telefono_solicitante, falla, prioridad, tipo_falla, estado, historial
-    )
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Reportado',$12)`,
-    [
-      id, activo || "", activo_descripcion || "", area || "", sucursal || "",
-      solicitante || "", empleado_solicitante || "", telefono_solicitante || "",
-      falla || "", prioridad || "Normal", tipo_falla || "", JSON.stringify(historial)
-    ]
-  );
-
-  const r = await pool.query("SELECT * FROM tickets WHERE id=$1", [id]);
-  res.json(ticketOut(r.rows[0]));
+app.post('/api/users/:id/reset-password', requireAdmin, async (req,res)=>{
+  const pass=String(req.body.password || 'Temp1234');
+  if(pass.length < 6) return res.status(400).json({error:'La contraseña debe tener mínimo 6 caracteres.'});
+  const hash=await bcrypt.hash(pass,12);
+  await pool.query('update users set password_hash=$1,must_change_password=true,failed_login_attempts=0,locked_until=null,updated_at=now() where id=$2',[hash,req.params.id]);
+  await logAction(req.session.user.id, 'reset_user_password', {id:req.params.id});
+  res.json({ok:true});
 });
-
-app.post("/api/tickets/:id/asignar", async (req, res) => {
-  const { tecnico_username } = req.body;
-  const tec = await pool.query("SELECT username, name FROM empleados WHERE username=$1 AND role='tecnico'", [tecnico_username]);
-  if (!tec.rows.length) return res.status(400).json({ error: "Técnico no encontrado" });
-
-  const old = await pool.query("SELECT historial FROM tickets WHERE id=$1", [req.params.id]);
-  if (!old.rows.length) return res.status(404).json({ error: "Ticket no encontrado" });
-  const hist = old.rows[0].historial || [];
-  hist.push({ fecha: nowISO(), evento: "Asignado a " + tec.rows[0].name });
-
-  const r = await pool.query(
-    `UPDATE tickets SET estado='Asignado', tecnico_username=$1, tecnico_nombre=$2, asignado=NOW(), historial=$3 WHERE id=$4 RETURNING *`,
-    [tec.rows[0].username, tec.rows[0].name, JSON.stringify(hist), req.params.id]
-  );
-  res.json(ticketOut(r.rows[0]));
+app.delete('/api/users/:id', requireAdmin, async (req,res)=>{
+  if(String(req.params.id) === String(req.session.user.id)) return res.status(400).json({error:'No puedes desactivarte a ti mismo.'});
+  await pool.query("update users set status='inactivo', updated_at=now() where id=$1", [req.params.id]);
+  await logAction(req.session.user.id, 'deactivate_user', {id:req.params.id});
+  res.json({ok:true});
 });
-
-app.post("/api/tickets/:id/iniciar", async (req, res) => {
-  const old = await pool.query("SELECT historial FROM tickets WHERE id=$1", [req.params.id]);
-  if (!old.rows.length) return res.status(404).json({ error: "Ticket no encontrado" });
-  const hist = old.rows[0].historial || [];
-  hist.push({ fecha: nowISO(), evento: "Técnico inicia atención" });
-
-  const r = await pool.query(
-    `UPDATE tickets SET estado='En atención', inicio=COALESCE(inicio,NOW()), historial=$1 WHERE id=$2 RETURNING *`,
-    [JSON.stringify(hist), req.params.id]
-  );
-  res.json(ticketOut(r.rows[0]));
-});
-
-app.post("/api/tickets/:id/terminar", async (req, res) => {
-  const { diagnostico, solucion } = req.body;
-  const old = await pool.query("SELECT historial FROM tickets WHERE id=$1", [req.params.id]);
-  if (!old.rows.length) return res.status(404).json({ error: "Ticket no encontrado" });
-  const hist = old.rows[0].historial || [];
-  hist.push({ fecha: nowISO(), evento: "Técnico termina reparación. Pendiente validación de producción." });
-
-  const r = await pool.query(
-    `UPDATE tickets SET estado='Pendiente validación', diagnostico=$1, solucion=$2, fin_tecnico=NOW(), historial=$3 WHERE id=$4 RETURNING *`,
-    [diagnostico || "", solucion || "", JSON.stringify(hist), req.params.id]
-  );
-  res.json(ticketOut(r.rows[0]));
-});
-
-app.post("/api/tickets/:id/liberar", async (req, res) => {
-  const old = await pool.query("SELECT historial FROM tickets WHERE id=$1", [req.params.id]);
-  if (!old.rows.length) return res.status(404).json({ error: "Ticket no encontrado" });
-  const hist = old.rows[0].historial || [];
-  hist.push({ fecha: nowISO(), evento: "Producción libera equipo" });
-
-  const r = await pool.query(
-    `UPDATE tickets SET estado='Liberado', liberado=NOW(), historial=$1 WHERE id=$2 RETURNING *`,
-    [JSON.stringify(hist), req.params.id]
-  );
-  res.json(ticketOut(r.rows[0]));
-});
-
-app.post("/api/tickets/:id/devolver", async (req, res) => {
-  const old = await pool.query("SELECT historial FROM tickets WHERE id=$1", [req.params.id]);
-  if (!old.rows.length) return res.status(404).json({ error: "Ticket no encontrado" });
-  const hist = old.rows[0].historial || [];
-  hist.push({ fecha: nowISO(), evento: "Producción devuelve ticket a MTTO" });
-
-  const r = await pool.query(
-    `UPDATE tickets SET estado='Devuelto', historial=$1 WHERE id=$2 RETURNING *`,
-    [JSON.stringify(hist), req.params.id]
-  );
-  res.json(ticketOut(r.rows[0]));
-});
-
-app.post("/api/import/activos", uploadExcel.single("archivo"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No se recibió archivo" });
-
-  const wb = XLSX.read(req.file.buffer, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-
-  let agregados = 0, actualizados = 0, omitidos = 0;
-  const errores = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const numero = clean(getCell(row, ["numero", "número", "num", "equipo", "activo", "no equipo", "numero equipo", "número equipo"]));
-    const descripcion = clean(getCell(row, ["descripcion", "descripción", "desc", "nombre", "equipo descripcion", "descripcion equipo"]));
-
-    if (!numero || !descripcion) {
-      omitidos++;
-      errores.push({ fila: i + 2, error: "Falta número/activo o descripción" });
-      continue;
+app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async (req,res)=>{
+  if(!req.file) return res.status(400).json({error:'Sube un archivo Excel.'});
+  const wb=XLSX.read(req.file.buffer,{type:'buffer'}); const ws=wb.Sheets[wb.SheetNames[0]]; const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
+  let agregados=0,actualizados=0,omitidos=0;
+  for(const row of rows){
+    const username=clean(row.usuario ?? row.USUARIO ?? row.username ?? row.USERNAME);
+    const name=clean(row.nombre ?? row.NOMBRE ?? row.name ?? row.NAME);
+    if(!username || !name){omitidos++; continue;}
+    const exists=await pool.query('select id from users where lower(username)=lower($1)',[username]);
+    const role=clean(row.rol ?? row.ROL ?? 'operaciones').toLowerCase();
+    if(exists.rows.length){
+      await pool.query(`update users set numero_empleado=$1,name=$2,role=$3,sucursal=$4,area_asignada=$5,telefono=$6,correo=$7,updated_at=now() where id=$8`, [clean(row.numeroEmpleado ?? row.NUMERO_EMPLEADO ?? row['NUM EMPLEADO']),name,role,clean(row.sucursal ?? row.SUCURSAL),clean(row.areaAsignada ?? row.AREA ?? row.area),clean(row.telefono ?? row.TELEFONO),clean(row.correo ?? row.CORREO),exists.rows[0].id]);
+      actualizados++;
+    } else {
+      const pass=String(row.password ?? row.PASSWORD ?? 'Temp1234'); const hash=await bcrypt.hash(pass,12);
+      await pool.query(`insert into users(numero_empleado,name,username,password_hash,role,status,must_change_password,sucursal,area_asignada,telefono,correo) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9)`, [clean(row.numeroEmpleado ?? row.NUMERO_EMPLEADO ?? row['NUM EMPLEADO']),name,username,hash,role,clean(row.sucursal ?? row.SUCURSAL),clean(row.areaAsignada ?? row.AREA ?? row.area),clean(row.telefono ?? row.TELEFONO),clean(row.correo ?? row.CORREO)]);
+      agregados++;
     }
-
-    const data = {
-      numero,
-      descripcion,
-      area: clean(getCell(row, ["area", "área", "departamento"])),
-      tipo: clean(getCell(row, ["tipo", "tipo equipo", "categoria", "categoría"])) || "Equipo",
-      sucursal: clean(getCell(row, ["sucursal", "planta"])),
-      ubicacion: clean(getCell(row, ["ubicacion", "ubicación"])),
-      marca: clean(getCell(row, ["marca"])),
-      modelo: clean(getCell(row, ["modelo"])),
-      serie: clean(getCell(row, ["serie", "serial"])),
-      estado: clean(getCell(row, ["estado"])) || "Activo"
-    };
-
-    const result = await pool.query(
-      `INSERT INTO activos (numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,serie,estado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       ON CONFLICT (numero) DO UPDATE SET
-        descripcion=EXCLUDED.descripcion,
-        area=EXCLUDED.area,
-        tipo=EXCLUDED.tipo,
-        sucursal=EXCLUDED.sucursal,
-        ubicacion=EXCLUDED.ubicacion,
-        marca=EXCLUDED.marca,
-        modelo=EXCLUDED.modelo,
-        serie=EXCLUDED.serie,
-        estado=EXCLUDED.estado
-       RETURNING (xmax = 0) AS inserted`,
-      [data.numero,data.descripcion,data.area,data.tipo,data.sucursal,data.ubicacion,data.marca,data.modelo,data.serie,data.estado]
-    );
-
-    if (result.rows[0]?.inserted) agregados++; else actualizados++;
   }
-
-  res.json({ ok: true, total: rows.length, agregados, actualizados, omitidos, errores });
+  await logAction(req.session.user.id, 'import_users', {agregados,actualizados,omitidos});
+  res.json({agregados,actualizados,omitidos,total:rows.length});
 });
 
-app.post("/api/import/empleados", uploadExcel.single("archivo"), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No se recibió archivo" });
+app.get('/api/tickets', requireLogin, async (req,res)=>{
+  const q=norm(req.query.q || ''); let params=[], where='';
+  if(q){ params.push('%'+q+'%'); where=`where upper(coalesce(id::text,'')||' '||coalesce(activo,'')||' '||coalesce(activo_descripcion,'')||' '||coalesce(area,'')||' '||coalesce(estado,'')||' '||coalesce(falla,'')||' '||coalesce(solicitante,'')) like $1`; }
+  const r=await pool.query(`select * from tickets ${where} order by creado desc limit 1000`, params);
+  res.json(r.rows.map(t=>({...t, responsableActual:t.tecnico_username || '', tiempos:{mttoMin:t.mtto_min||0, produccionMin:t.produccion_min||0, muertoTotalMin:(t.mtto_min||0)+(t.produccion_min||0)}})));
+});
+app.post('/api/tickets', requireLogin, async (req,res)=>{
+  const t=req.body; if(!clean(t.falla)) return res.status(400).json({error:'Describe la falla.'});
+  const r=await pool.query(`insert into tickets(activo,activo_descripcion,area,sucursal,ubicacion,solicitante,empleado_solicitante,telefono_solicitante,falla,prioridad,tipo_falla,created_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`, [clean(t.activo),clean(t.activo_descripcion),clean(t.area),clean(t.sucursal),clean(t.ubicacion),clean(t.solicitante),clean(t.empleado_solicitante),clean(t.telefono_solicitante),clean(t.falla),clean(t.prioridad||'Normal'),clean(t.tipo_falla),req.session.user.id]);
+  await logAction(req.session.user.id, 'create_ticket', {ticket:r.rows[0].id, activo:t.activo});
+  res.json(r.rows[0]);
+});
+app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2",[clean(req.body.tecnico_username),req.params.id]); await logAction(req.session.user.id,'assign_ticket',{id:req.params.id}); res.json({ok:true}); });
+app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='En atención', iniciado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'start_ticket',{id:req.params.id}); res.json({ok:true}); });
+app.post('/api/tickets/:id/terminar', requireLogin, async (req,res)=>{
+  const r=await pool.query('select * from tickets where id=$1',[req.params.id]); const t=r.rows[0];
+  const start=t.iniciado ? new Date(t.iniciado) : new Date(t.creado); const min=Math.max(0, Math.round((Date.now()-start.getTime())/60000));
+  await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5",[clean(req.body.diagnostico),clean(req.body.solucion),min,min,req.params.id]);
+  await logAction(req.session.user.id,'finish_ticket',{id:req.params.id}); res.json({ok:true});
+});
+app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Liberado', liberado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'release_ticket',{id:req.params.id}); res.json({ok:true}); });
+app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]); await logAction(req.session.user.id,'return_ticket',{id:req.params.id}); res.json({ok:true}); });
 
-  const wb = XLSX.read(req.file.buffer, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-
-  let agregados = 0, actualizados = 0, omitidos = 0;
-  const errores = [];
-
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const numeroEmpleado = clean(getCell(row, ["numeroEmpleado", "numero empleado", "número empleado", "empleado", "no empleado"]));
-    const name = clean(getCell(row, ["nombre", "name", "empleado nombre", "nombre completo"]));
-    let username = clean(getCell(row, ["username", "usuario", "user"]));
-
-    if (!username && numeroEmpleado) username = numeroEmpleado;
-    if (!username || !name) {
-      omitidos++;
-      errores.push({ fila: i + 2, error: "Falta usuario/número empleado o nombre" });
-      continue;
-    }
-
-    const data = {
-      numero_empleado: numeroEmpleado,
-      username,
-      password: clean(getCell(row, ["password", "contraseña", "contrasena"])) || "1234",
-      role: normalizeRole(getCell(row, ["role", "rol", "puesto", "perfil"])),
-      name,
-      sucursal: clean(getCell(row, ["sucursal", "planta"])),
-      area_asignada: clean(getCell(row, ["areaAsignada", "area asignada", "área asignada", "area", "área"])),
-      telefono: clean(getCell(row, ["telefono", "teléfono", "celular", "extension", "extensión"])),
-      correo: clean(getCell(row, ["correo", "email", "mail"]))
-    };
-
-    const result = await pool.query(
-      `INSERT INTO empleados (numero_empleado,username,password,role,name,sucursal,area_asignada,telefono,correo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-       ON CONFLICT (username) DO UPDATE SET
-        numero_empleado=EXCLUDED.numero_empleado,
-        password=EXCLUDED.password,
-        role=EXCLUDED.role,
-        name=EXCLUDED.name,
-        sucursal=EXCLUDED.sucursal,
-        area_asignada=EXCLUDED.area_asignada,
-        telefono=EXCLUDED.telefono,
-        correo=EXCLUDED.correo,
-        activo=true
-       RETURNING (xmax = 0) AS inserted`,
-      [data.numero_empleado,data.username,data.password,data.role,data.name,data.sucursal,data.area_asignada,data.telefono,data.correo]
-    );
-
-    if (result.rows[0]?.inserted) agregados++; else actualizados++;
-  }
-
-  res.json({ ok: true, total: rows.length, agregados, actualizados, omitidos, errores });
+app.get('/api/reportes', requireLogin, async (req,res)=>{
+  const [tot,est,area,tipo,act,emp] = await Promise.all([
+    pool.query('select count(*)::int total, count(*) filter(where estado <> \'Liberado\')::int abiertos, coalesce(sum(mtto_min),0)::int mtto, coalesce(sum(produccion_min),0)::int prod from tickets'),
+    pool.query('select estado,count(*)::int n from tickets group by estado order by n desc'),
+    pool.query('select coalesce(area,\'Sin área\') area,count(*)::int n from tickets group by coalesce(area,\'Sin área\') order by n desc'),
+    pool.query('select coalesce(tipo_falla,\'Sin tipo\') tipo,count(*)::int n from tickets group by coalesce(tipo_falla,\'Sin tipo\') order by n desc'),
+    pool.query('select count(*)::int n from activos'),
+    pool.query('select count(*)::int n from users')
+  ]);
+  const obj = rows => Object.fromEntries(rows.map(x=>[x.estado||x.area||x.tipo,x.n]));
+  res.json({ totalTickets:tot.rows[0].total, abiertos:tot.rows[0].abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin:tot.rows[0].mtto, produccionMin:tot.rows[0].prod, porEstado:obj(est.rows), porArea:obj(area.rows), porTipoFalla:obj(tipo.rows) });
+});
+app.get('/api/export/excel', requireLogin, async (req,res)=>{
+  const [tickets, activos, users] = await Promise.all([pool.query('select * from tickets order by creado desc'),pool.query('select * from activos order by numero'),pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')]);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tickets.rows), 'Tickets');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(activos.rows), 'Activos');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users.rows), 'Usuarios');
+  const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
+  res.setHeader('Content-Disposition','attachment; filename="reporte-ibs.xlsx"');
+  res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.send(buf);
 });
 
-app.get("/api/reportes", async (req, res) => {
-  const ticketsR = await pool.query("SELECT * FROM tickets ORDER BY creado DESC");
-  const activosR = await pool.query("SELECT COUNT(*)::int AS total FROM activos");
-  const empleadosR = await pool.query("SELECT COUNT(*)::int AS total FROM empleados WHERE activo=true");
-
-  const tickets = ticketsR.rows.map(ticketOut);
-  const abiertos = tickets.filter(t => t.estado !== "Liberado").length;
-  const liberados = tickets.filter(t => t.estado === "Liberado").length;
-
-  const tiempos = tickets.reduce((acc, t) => {
-    acc.mttoMin += t.tiempos.mttoMin;
-    acc.produccionMin += t.tiempos.produccionMin;
-    acc.muertoTotalMin += t.tiempos.muertoTotalMin;
-    return acc;
-  }, { mttoMin: 0, produccionMin: 0, muertoTotalMin: 0 });
-
-  const porEstado = {};
-  const porArea = {};
-  const porTipoFalla = {};
-
-  for (const t of tickets) {
-    porEstado[t.estado] = (porEstado[t.estado] || 0) + 1;
-    porArea[t.area || "Sin área"] = (porArea[t.area || "Sin área"] || 0) + 1;
-    porTipoFalla[t.tipo_falla || "Sin tipo"] = (porTipoFalla[t.tipo_falla || "Sin tipo"] || 0) + 1;
-  }
-
-  res.json({
-    totalTickets: tickets.length,
-    abiertos,
-    liberados,
-    totalActivos: activosR.rows[0].total,
-    totalEmpleados: empleadosR.rows[0].total,
-    ...tiempos,
-    porEstado,
-    porArea,
-    porTipoFalla,
-    tickets
-  });
-});
-
-app.get("/api/export/excel", async (req, res) => {
-  const activos = (await pool.query("SELECT * FROM activos ORDER BY numero")).rows;
-  const empleados = (await pool.query("SELECT id, numero_empleado, username, role, name, sucursal, area_asignada, telefono, correo, activo FROM empleados ORDER BY name")).rows;
-  const ticketsRaw = (await pool.query("SELECT * FROM tickets ORDER BY creado DESC")).rows;
-  const tickets = ticketsRaw.map(ticketOut).map(t => ({
-    id: t.id,
-    activo: t.activo,
-    descripcion: t.activo_descripcion,
-    area: t.area,
-    sucursal: t.sucursal,
-    solicitante: t.solicitante,
-    falla: t.falla,
-    prioridad: t.prioridad,
-    tipo_falla: t.tipo_falla,
-    estado: t.estado,
-    tecnico: t.tecnico_nombre,
-    creado: t.creado,
-    asignado: t.asignado,
-    inicio: t.inicio,
-    fin_tecnico: t.fin_tecnico,
-    liberado: t.liberado,
-    esperaAsignacionMin: t.tiempos.esperaAsignacionMin,
-    esperaAtencionMin: t.tiempos.esperaAtencionMin,
-    reparacionMin: t.tiempos.reparacionMin,
-    esperaLiberacionProduccionMin: t.tiempos.esperaLiberacionMin,
-    tiempoMTTOMin: t.tiempos.mttoMin,
-    tiempoProduccionMin: t.tiempos.produccionMin,
-    muertoTotalMin: t.tiempos.muertoTotalMin,
-    responsableActual: t.responsableActual,
-    diagnostico: t.diagnostico,
-    solucion: t.solucion
-  }));
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(activos), "Activos");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(empleados), "Empleados");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tickets), "Tickets");
-  const buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-
-  res.setHeader("Content-Disposition", "attachment; filename=mantenimiento_ibs_reporte.xlsx");
-  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.send(buffer);
-});
-
-app.get("/api/export", async (req, res) => {
-  const ticketsRaw = (await pool.query("SELECT * FROM tickets ORDER BY creado DESC")).rows;
-  const rows = ticketsRaw.map(ticketOut).map(t => ({
-    id: t.id,
-    activo: t.activo,
-    descripcion: t.activo_descripcion,
-    area: t.area,
-    solicitante: t.solicitante,
-    falla: t.falla,
-    estado: t.estado,
-    tecnico: t.tecnico_nombre,
-    creado: t.creado,
-    asignado: t.asignado,
-    inicio: t.inicio,
-    fin_tecnico: t.fin_tecnico,
-    liberado: t.liberado,
-    tiempoMTTOMin: t.tiempos.mttoMin,
-    tiempoProduccionMin: t.tiempos.produccionMin,
-    muertoTotalMin: t.tiempos.muertoTotalMin,
-    responsableActual: t.responsableActual
-  }));
-  const headers = Object.keys(rows[0] || { id: "" });
-  const csv = [headers.join(","), ...rows.map(row => headers.map(h => `"${String(row[h] ?? "").replaceAll('"','""')}"`).join(","))].join("\n");
-  res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader("Content-Disposition", "attachment; filename=mantenimiento_ibs.csv");
-  res.send(csv);
-});
-
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-initDB()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log("MANTENIMIENTO IBS listo con Neon + Excel + Reportes");
-      console.log("Puerto:", PORT);
-    });
-  })
-  .catch(err => {
-    console.error("Error iniciando base de datos:", err);
-    process.exit(1);
-  });
+app.get('*', (req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
+initDb().then(()=> app.listen(PORT, ()=> console.log(`IBS v2 listo en puerto ${PORT}`))).catch(e=>{ console.error(e); process.exit(1); });
