@@ -11,7 +11,7 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-if (!process.env.DATABASE_URL) console.warn('Falta DATABASE_URL. Configúralo en Render/Neon.');
+if (!process.env.DATABASE_URL) { console.error('Falta DATABASE_URL. Configúralo en Render/Neon.'); process.exit(1); }
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -24,7 +24,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  store: new PgSession({ pool, tableName: 'session' }),
+  store: new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
   name: 'ibs_sid',
   secret: process.env.SESSION_SECRET || 'dev_secret_cambiar',
   resave: false,
