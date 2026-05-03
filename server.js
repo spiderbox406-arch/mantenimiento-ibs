@@ -24,7 +24,11 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-  store: new PgSession({ pool, tableName: 'session' }),
+store: new PgSession({
+  pool,
+  tableName: 'session',
+  createTableIfMissing: true
+}),
   name: 'ibs_sid',
   secret: process.env.SESSION_SECRET || 'dev_secret_cambiar',
   resave: false,
