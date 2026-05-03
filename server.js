@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
 const path = require('path');
 
@@ -24,11 +25,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(session({
-store: new PgSession({
-  pool,
-  tableName: 'session',
-  createTableIfMissing: true
-}),
+  store: new PgSession({ pool, tableName: 'session', createTableIfMissing: true }),
   name: 'ibs_sid',
   secret: process.env.SESSION_SECRET || 'dev_secret_cambiar',
   resave: false,
@@ -44,6 +41,115 @@ function requireAdmin(req,res,next){ if(!req.session.user || req.session.user.ro
 function publicUser(u){ if(!u) return null; const { password_hash, failed_login_attempts, ...safe } = u; return safe; }
 async function logAction(userId, action, details = {}){
   try { await pool.query('insert into user_activity_log(user_id, action, details) values($1,$2,$3)', [userId || null, action, JSON.stringify(details)]); } catch(e){ console.error('logAction', e.message); }
+}
+
+
+function emailConfigured(){
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.EMAIL_FROM);
+}
+function getMailer(){
+  if(!emailConfigured()) return null;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+  });
+}
+async function sendMailSafe({to, cc, subject, text, html}){
+  try{
+    if(!emailConfigured()){
+      console.log('Correo no configurado. Se omite:', subject);
+      return {ok:false, skipped:true};
+    }
+    if(!to){
+      console.log('Correo sin destinatario. Se omite:', subject);
+      return {ok:false, skipped:true};
+    }
+    const info = await getMailer().sendMail({
+      from: process.env.EMAIL_FROM,
+      to,
+      cc: cc || undefined,
+      subject,
+      text,
+      html
+    });
+    console.log('Correo enviado:', info.messageId || subject);
+    return {ok:true};
+  }catch(e){
+    console.error('Error enviando correo:', e.message);
+    return {ok:false, error:e.message};
+  }
+}
+function ticketMailHtml(title, t){
+  return `<div style="font-family:Arial,sans-serif;line-height:1.45">
+    <h2 style="color:#ff6a00">${title}</h2>
+    <p><b>Ticket:</b> ${t.id}</p>
+    <p><b>Activo:</b> ${t.activo || ''} · ${t.activo_descripcion || ''}</p>
+    <p><b>Área:</b> ${t.area || ''}</p>
+    <p><b>Ubicación:</b> ${t.ubicacion || ''}</p>
+    <p><b>Solicitante:</b> ${t.solicitante || ''}</p>
+    <p><b>Teléfono/extensión:</b> ${t.telefono_solicitante || ''}</p>
+    <p><b>Prioridad:</b> ${t.prioridad || ''}</p>
+    <p><b>Tipo de falla:</b> ${t.tipo_falla || ''}</p>
+    <p><b>Estado:</b> ${t.estado || ''}</p>
+    <p><b>Falla:</b><br>${String(t.falla || '').replace(/\\n/g,'<br>')}</p>
+    ${t.tecnico_username ? `<p><b>Técnico:</b> ${t.tecnico_username}</p>` : ''}
+    ${t.diagnostico ? `<p><b>Diagnóstico:</b><br>${String(t.diagnostico).replace(/\\n/g,'<br>')}</p>` : ''}
+    ${t.solucion ? `<p><b>Solución:</b><br>${String(t.solucion).replace(/\\n/g,'<br>')}</p>` : ''}
+    <hr><p style="font-size:12px;color:#666">Sistema Mantenimiento IBS · Interbandas</p>
+  </div>`;
+}
+function ticketMailText(title, t){
+  return `${title}
+
+Ticket: ${t.id}
+Activo: ${t.activo || ''} · ${t.activo_descripcion || ''}
+Área: ${t.area || ''}
+Ubicación: ${t.ubicacion || ''}
+Solicitante: ${t.solicitante || ''}
+Teléfono/extensión: ${t.telefono_solicitante || ''}
+Prioridad: ${t.prioridad || ''}
+Tipo de falla: ${t.tipo_falla || ''}
+Estado: ${t.estado || ''}
+Falla: ${t.falla || ''}
+Técnico: ${t.tecnico_username || ''}
+Diagnóstico: ${t.diagnostico || ''}
+Solución: ${t.solucion || ''}`;
+}
+async function notifyTicketCreated(t){
+  return sendMailSafe({
+    to: process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO || process.env.SMTP_USER,
+    subject: `Nuevo ticket IBS ${t.id} - ${t.activo || ''}`,
+    text: ticketMailText('Nuevo ticket de mantenimiento', t),
+    html: ticketMailHtml('Nuevo ticket de mantenimiento', t)
+  });
+}
+async function notifyTicketAssigned(t, tecnicoCorreo){
+  return sendMailSafe({
+    to: tecnicoCorreo || process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
+    cc: process.env.EMAIL_MTTO_CC || undefined,
+    subject: `Ticket asignado ${t.id} - ${t.activo || ''}`,
+    text: ticketMailText('Ticket asignado', t),
+    html: ticketMailHtml('Ticket asignado', t)
+  });
+}
+async function notifyTicketFinished(t){
+  return sendMailSafe({
+    to: process.env.EMAIL_PRODUCCION_TO || process.env.EMAIL_ALERTS_TO || process.env.EMAIL_MTTO_TO,
+    cc: process.env.EMAIL_MTTO_CC || undefined,
+    subject: `Pendiente liberación ${t.id} - ${t.activo || ''}`,
+    text: ticketMailText('Equipo pendiente de liberación por producción', t),
+    html: ticketMailHtml('Equipo pendiente de liberación por producción', t)
+  });
+}
+async function notifyTicketReleased(t){
+  return sendMailSafe({
+    to: process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
+    subject: `Ticket liberado ${t.id} - ${t.activo || ''}`,
+    text: ticketMailText('Ticket liberado', t),
+    html: ticketMailHtml('Ticket liberado', t)
+  });
 }
 
 function minutesBetween(a, b){
@@ -143,13 +249,10 @@ async function initDb(){
     );
   `);
 
-  // Migraciones seguras para bases Neon ya existentes
+  // Migraciones seguras para bases Neon existentes
   await pool.query(`
     ALTER TABLE users ADD COLUMN IF NOT EXISTS numero_empleado text;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS name text;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS username text;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash text;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'operaciones';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'activo';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS area_asignada text;
@@ -158,8 +261,6 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS correo text;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts int NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until timestamptz;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS ubicacion text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS marca text;
@@ -167,40 +268,21 @@ async function initDb(){
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS usuario text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS estatus text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS search_text text;
-    ALTER TABLE activos ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
-    ALTER TABLE activos ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS activo text;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS activo_descripcion text;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS area text;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS sucursal text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ubicacion text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS solicitante text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS empleado_solicitante text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS telefono_solicitante text;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS falla text;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS prioridad text DEFAULT 'Normal';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo_falla text;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS estado text NOT NULL DEFAULT 'Reportado';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tecnico_username text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS diagnostico text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS solucion text;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS creado timestamptz NOT NULL DEFAULT now();
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS asignado timestamptz;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS iniciado timestamptz;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS terminado timestamptz;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS liberado timestamptz;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS mtto_min int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS produccion_min int DEFAULT 0;
-    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS created_by bigint;
-
-    CREATE TABLE IF NOT EXISTS user_activity_log(
-      id bigserial primary key,
-      user_id bigint,
-      action text not null,
-      details jsonb default '{}'::jsonb,
-      created_at timestamptz not null default now()
-    );
   `);
 
   const c = await pool.query('select count(*)::int as n from users');
@@ -209,10 +291,10 @@ async function initDb(){
     await pool.query(`insert into users(name, username, password_hash, role, status, must_change_password) values($1,$2,$3,$4,$5,$6)`, ['Administrador IBS','admin',hash,'admin','activo',true]);
     console.log('Usuario inicial creado: admin / 1234');
   } else {
-    const admin = await pool.query("select id, must_change_password, password_hash from users where lower(username)='admin' limit 1");
-    if(admin.rows[0] && (!admin.rows[0].password_hash || admin.rows[0].must_change_password)){
+    const admin = await pool.query("select id, must_change_password from users where lower(username)='admin' limit 1");
+    if(admin.rows[0]?.must_change_password){
       const hash = await bcrypt.hash('1234', 12);
-      await pool.query("update users set password_hash=$1, status='activo', role='admin', must_change_password=true, updated_at=now() where id=$2", [hash, admin.rows[0].id]);
+      await pool.query("update users set password_hash=$1, status='activo', role='admin', updated_at=now() where id=$2", [hash, admin.rows[0].id]);
       console.log('Admin inicial actualizado: admin / 1234');
     }
   }
@@ -222,7 +304,7 @@ async function initDb(){
 app.get('/api/health', async (req,res)=>{
   try{
     const r = await pool.query('select now() as hora');
-    res.json({ok:true, db:'Neon conectado', hora:r.rows[0].hora});
+    res.json({ok:true, db:'Neon conectado', emailConfigured: emailConfigured(), hora:r.rows[0].hora});
   }catch(e){
     res.status(500).json({ok:false, error:e.message});
   }
@@ -388,6 +470,18 @@ app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async 
   res.json({agregados,actualizados,omitidos,total:rows.length});
 });
 
+
+app.post('/api/test-email', requireAdmin, async (req,res)=>{
+  const to = clean(req.body.to || process.env.EMAIL_ALERTS_TO || process.env.SMTP_USER);
+  const result = await sendMailSafe({
+    to,
+    subject: 'Prueba correo Mantenimiento IBS',
+    text: 'Correo de prueba enviado desde Sistema Mantenimiento IBS.',
+    html: '<h2 style="color:#ff6a00">Prueba correo Mantenimiento IBS</h2><p>Correo de prueba enviado correctamente.</p>'
+  });
+  res.json(result);
+});
+
 app.get('/api/tickets', requireLogin, async (req,res)=>{
   const q=norm(req.query.q || ''); let params=[], where='';
   if(q){ params.push('%'+q+'%'); where=`where upper(coalesce(id::text,'')||' '||coalesce(activo,'')||' '||coalesce(activo_descripcion,'')||' '||coalesce(area,'')||' '||coalesce(estado,'')||' '||coalesce(falla,'')||' '||coalesce(solicitante,'')) like $1`; }
@@ -398,9 +492,17 @@ app.post('/api/tickets', requireLogin, async (req,res)=>{
   const t=req.body; if(!clean(t.falla)) return res.status(400).json({error:'Describe la falla.'});
   const r=await pool.query(`insert into tickets(activo,activo_descripcion,area,sucursal,ubicacion,solicitante,empleado_solicitante,telefono_solicitante,falla,prioridad,tipo_falla,created_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`, [clean(t.activo),clean(t.activo_descripcion),clean(t.area),clean(t.sucursal),clean(t.ubicacion),clean(t.solicitante),clean(t.empleado_solicitante),clean(t.telefono_solicitante),clean(t.falla),clean(t.prioridad||'Normal'),clean(t.tipo_falla),req.session.user.id]);
   await logAction(req.session.user.id, 'create_ticket', {ticket:r.rows[0].id, activo:t.activo});
+  await notifyTicketCreated(r.rows[0]);
   res.json(r.rows[0]);
 });
-app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2",[clean(req.body.tecnico_username),req.params.id]); await logAction(req.session.user.id,'assign_ticket',{id:req.params.id}); res.json({ok:true}); });
+app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
+  const tecnico = clean(req.body.tecnico_username);
+  const up = await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2 returning *",[tecnico,req.params.id]);
+  await logAction(req.session.user.id,'assign_ticket',{id:req.params.id});
+  const tec = await pool.query("select correo from users where lower(username)=lower($1) limit 1",[tecnico]);
+  if(up.rows[0]) await notifyTicketAssigned(up.rows[0], tec.rows[0]?.correo);
+  res.json({ok:true});
+});
 app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='En atención', iniciado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'start_ticket',{id:req.params.id}); res.json({ok:true}); });
 app.post('/api/tickets/:id/terminar', requireLogin, async (req,res)=>{
   const r=await pool.query('select * from tickets where id=$1',[req.params.id]);
@@ -410,8 +512,9 @@ app.post('/api/tickets/:id/terminar', requireLogin, async (req,res)=>{
   const iniciado = t.iniciado || now;
   const mttoMin = minutesBetween(iniciado, now);
   const produccionMin = Math.max(0, minutesBetween(t.creado, now) - mttoMin);
-  await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5",[clean(req.body.diagnostico),clean(req.body.solucion),mttoMin,produccionMin,req.params.id]);
+  const up = await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5 returning *",[clean(req.body.diagnostico),clean(req.body.solucion),mttoMin,produccionMin,req.params.id]);
   await logAction(req.session.user.id,'finish_ticket',{id:req.params.id, mttoMin, produccionMin});
+  if(up.rows[0]) await notifyTicketFinished(up.rows[0]);
   res.json({ok:true});
 });
 app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
@@ -420,8 +523,9 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
   if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
   const now = new Date();
   const tiempos = calcTicketTimes({...t, liberado: now, estado:'Liberado'}, now);
-  await pool.query("update tickets set estado='Liberado', liberado=now(), mtto_min=$1, produccion_min=$2 where id=$3",[tiempos.mttoMin, tiempos.produccionMin, req.params.id]);
+  const up = await pool.query("update tickets set estado='Liberado', liberado=now(), mtto_min=$1, produccion_min=$2 where id=$3 returning *",[tiempos.mttoMin, tiempos.produccionMin, req.params.id]);
   await logAction(req.session.user.id,'release_ticket',{id:req.params.id, tiempos});
+  if(up.rows[0]) await notifyTicketReleased(up.rows[0]);
   res.json({ok:true, tiempos});
 });
 app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]); await logAction(req.session.user.id,'return_ticket',{id:req.params.id}); res.json({ok:true}); });
