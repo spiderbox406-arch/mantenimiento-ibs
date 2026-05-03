@@ -5,60 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MANTENIMIENTO IBS</title>
 <style>
-:root{
-  --orange:#ff6a00;
-  --orange2:#ff8a2a;
-  --black:#101010;
-  --dark:#1f2328;
-  --panel:#ffffff;
-  --line:#d8dde3;
-  --bg:#eef1f4;
-  --green:#0f8a4b;
-  --blue:#1769aa;
-  --red:#b42318;
-  --yellow:#b7791f;
-}
-*{box-sizing:border-box}
-body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--dark)}
+:root{--orange:#ff6a00;--dark:#111;--line:#d8dde3;--bg:#eef1f4;--green:#0f8a4b;--blue:#1769aa;--red:#b42318;--yellow:#b7791f;--purple:#6b46c1}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#1f2328}
 button{border:0;border-radius:14px;padding:12px 16px;font-weight:900;font-size:15px;cursor:pointer;margin:4px}
-.btn-orange{background:var(--orange);color:white}.btn-dark{background:var(--dark);color:white}.btn-green{background:var(--green);color:white}.btn-blue{background:var(--blue);color:white}.btn-red{background:var(--red);color:white}.btn-gray{background:#666;color:white}
-input,select,textarea{width:100%;border:1px solid var(--line);border-radius:14px;padding:12px;font-size:16px;background:white}
-textarea{min-height:90px;resize:vertical}
-label{font-weight:900;font-size:13px;color:#555;display:block;margin:10px 0 5px}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.btn-orange{background:var(--orange);color:white}.btn-dark{background:#222;color:white}.btn-green{background:var(--green);color:white}.btn-blue{background:var(--blue);color:white}.btn-red{background:var(--red);color:white}.btn-gray{background:#666;color:white}.btn-purple{background:var(--purple);color:white}
+input,select,textarea{width:100%;border:1px solid var(--line);border-radius:14px;padding:12px;font-size:16px;background:white}textarea{min-height:80px;resize:vertical}
+label{font-weight:900;font-size:13px;color:#555;display:block;margin:10px 0 5px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
 .muted{color:#666;font-size:13px}
-.login-page{
-  min-height:100vh;
-  display:grid;
-  grid-template-columns:1.1fr .9fr;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(255,106,0,.35), transparent 28%),
-    linear-gradient(90deg,rgba(0,0,0,.92),rgba(0,0,0,.78),rgba(0,0,0,.46)),
-    url("https://images.unsplash.com/photo-1581092580497-e0d23cbdf1dc?auto=format&fit=crop&w=1800&q=80");
-  background-size:cover;background-position:center;
-}
-.login-left{display:flex;flex-direction:column;justify-content:center;padding:70px;color:white;position:relative}
-.ibs-logo-wrap{background:white;border:4px solid var(--orange);border-radius:18px;padding:10px 18px;width:max-content;max-width:390px;box-shadow:0 18px 55px #0008;margin-bottom:34px}
-.ibs-logo-wrap img{display:block;width:290px;max-width:75vw;height:auto}
-.login-title{font-size:56px;line-height:1;margin:0 0 16px;font-weight:900;letter-spacing:-1.5px}
-.login-title strong{color:var(--orange)}
-.login-subtitle{font-size:20px;color:#e5e5e5;max-width:720px;line-height:1.48}
-.machine-strip{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:12px;max-width:760px;margin-top:28px}
-.machine-card{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(5px);border-radius:18px;padding:16px;box-shadow:0 14px 40px #0005}
-.machine-card .ico{font-size:34px;display:block;margin-bottom:8px}.machine-card b{display:block;color:white}.machine-card small{display:block;color:#ccc;margin-top:5px}
-.login-right{display:flex;align-items:center;justify-content:center;padding:30px;z-index:1}
-.login-card{width:100%;max-width:430px;background:rgba(255,255,255,.97);border-radius:28px;padding:30px;box-shadow:0 26px 80px #000a;border-top:9px solid var(--orange)}
-.system-online{display:flex;align-items:center;gap:8px;font-size:13px;color:#0f8a4b;font-weight:900;margin-bottom:14px}
-.dot-online{width:10px;height:10px;border-radius:50%;background:#0f8a4b;box-shadow:0 0 0 5px rgba(15,138,75,.12)}
-.login-card h2{margin:0;font-size:30px}.login-card p{color:#666;margin:8px 0 20px}.login-card input{background:#f7f7f7;border:1px solid #ddd}.login-card button{width:100%;margin:14px 0 0;font-size:17px;padding:14px}.login-footer{text-align:center;margin-top:18px;font-size:12px;color:#777}
-header{background:#111;color:white;padding:14px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10;border-bottom:4px solid var(--orange);box-shadow:0 7px 22px #0003}
-.header-logo{background:white;border:3px solid var(--orange);border-radius:14px;padding:6px 10px}.header-logo img{width:190px;max-width:45vw;display:block}.header-title h1{margin:0;font-size:24px}.header-title div{font-size:13px;color:#bbb}.topActions{margin-left:auto;display:flex;flex-wrap:wrap;gap:5px}
-main{padding:18px;max-width:1250px;margin:auto}.hero{background:linear-gradient(120deg,#111 0%,#222 46%,rgba(255,106,0,.88) 100%);color:white;border-radius:26px;padding:24px;margin-bottom:16px;box-shadow:0 13px 35px #0002;overflow:hidden;position:relative}.hero:after{content:"⚙️";position:absolute;right:35px;top:15px;font-size:120px;opacity:.12}.hero h2{margin:0 0 8px;font-size:32px}.hero p{margin:0;color:#e9e9e9}
-.cards-machines{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}.area-card{background:white;border:1px solid var(--line);border-radius:20px;padding:18px;box-shadow:0 6px 18px #0001;border-left:7px solid var(--orange)}.area-card .ico{font-size:36px;margin-bottom:8px}.area-card b{display:block;font-size:17px}.area-card span{font-size:13px;color:#666}
-.card{background:white;border:1px solid var(--line);border-radius:22px;padding:18px;margin-bottom:16px;box-shadow:0 6px 18px #0001}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}.kpi{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 6px 18px #0001}.kpi b{font-size:30px;display:block;color:var(--orange)}
-.status{display:inline-block;color:white;border-radius:999px;padding:7px 10px;font-weight:900;font-size:12px}.Reportado{background:var(--red)}.Liberado{background:var(--green)}
-table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top;font-size:14px}th{background:#f8fafc}.empty{padding:22px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:18px;color:#666}
-@media(max-width:950px){.login-page{grid-template-columns:1fr}.login-left{padding:35px 24px 10px}.login-title{font-size:40px}.login-subtitle{font-size:16px}.machine-strip{grid-template-columns:1fr 1fr}.cards-machines,.kpis,.grid,.grid3{grid-template-columns:1fr}.topActions{margin-left:0}header{align-items:flex-start;flex-wrap:wrap}}
+.login-page{min-height:100vh;display:grid;grid-template-columns:1.1fr .9fr;background:radial-gradient(circle at 20% 20%, rgba(255,106,0,.35), transparent 28%),linear-gradient(90deg,rgba(0,0,0,.92),rgba(0,0,0,.78),rgba(0,0,0,.46)),url("https://images.unsplash.com/photo-1581092580497-e0d23cbdf1dc?auto=format&fit=crop&w=1800&q=80");background-size:cover;background-position:center}
+.login-left{display:flex;flex-direction:column;justify-content:center;padding:70px;color:white}.ibs-logo-wrap{background:white;border:4px solid var(--orange);border-radius:18px;padding:10px 18px;width:max-content;box-shadow:0 18px 55px #0008;margin-bottom:34px}.ibs-logo-wrap img{display:block;width:290px;max-width:75vw;height:auto}.login-title{font-size:56px;line-height:1;margin:0 0 16px;font-weight:900}.login-title strong{color:var(--orange)}.login-subtitle{font-size:20px;color:#e5e5e5;max-width:720px;line-height:1.48}.machine-strip{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:12px;max-width:760px;margin-top:28px}.machine-card{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(5px);border-radius:18px;padding:16px;box-shadow:0 14px 40px #0005}.machine-card .ico{font-size:34px;display:block;margin-bottom:8px}.machine-card b{display:block;color:white}.machine-card small{display:block;color:#ccc;margin-top:5px}.login-right{display:flex;align-items:center;justify-content:center;padding:30px}.login-card{width:100%;max-width:430px;background:rgba(255,255,255,.97);border-radius:28px;padding:30px;box-shadow:0 26px 80px #000a;border-top:9px solid var(--orange)}.system-online{display:flex;align-items:center;gap:8px;font-size:13px;color:#0f8a4b;font-weight:900;margin-bottom:14px}.dot-online{width:10px;height:10px;border-radius:50%;background:#0f8a4b;box-shadow:0 0 0 5px rgba(15,138,75,.12)}.login-card h2{margin:0;font-size:30px}.login-card p{color:#666;margin:8px 0 20px}.login-card input{background:#f7f7f7}.login-card button{width:100%;margin-top:14px}.login-footer{text-align:center;margin-top:18px;font-size:12px;color:#777}
+header{background:#111;color:white;padding:14px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10;border-bottom:4px solid var(--orange);box-shadow:0 7px 22px #0003}.header-logo{background:white;border:3px solid var(--orange);border-radius:14px;padding:6px 10px}.header-logo img{width:190px;max-width:45vw;display:block}.header-title h1{margin:0;font-size:24px}.header-title div{font-size:13px;color:#bbb}.topActions{margin-left:auto;display:flex;flex-wrap:wrap;gap:5px}
+main{padding:18px;max-width:1350px;margin:auto}.hero{background:linear-gradient(120deg,#111 0%,#222 46%,rgba(255,106,0,.88) 100%);color:white;border-radius:26px;padding:24px;margin-bottom:16px;box-shadow:0 13px 35px #0002;position:relative;overflow:hidden}.hero:after{content:"⚙️";position:absolute;right:35px;top:15px;font-size:120px;opacity:.12}.hero h2{margin:0 0 8px;font-size:32px}.hero p{margin:0;color:#e9e9e9}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.tab{background:white;color:#222;border:1px solid var(--line)}.tab.active{background:var(--orange);color:white}
+.card{background:white;border:1px solid var(--line);border-radius:22px;padding:18px;margin-bottom:16px;box-shadow:0 6px 18px #0001}.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:16px}.kpi{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 6px 18px #0001}.kpi b{font-size:28px;display:block;color:var(--orange)}
+.status{display:inline-block;color:white;border-radius:999px;padding:7px 10px;font-weight:900;font-size:12px}.Reportado{background:var(--red)}.Asignado{background:var(--yellow)}.Enatención{background:var(--blue)}.Pendientevalidación{background:var(--purple)}.Devuelto{background:#97266d}.Liberado{background:var(--green)}
+table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top;font-size:14px}th{background:#f8fafc}.empty{padding:22px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:18px;color:#666}.bar{height:10px;border-radius:999px;background:#e2e8f0;overflow:hidden}.bar span{display:block;height:100%;background:var(--orange)}
+@media(max-width:950px){.login-page{grid-template-columns:1fr}.login-left{padding:35px 24px 10px}.login-title{font-size:40px}.machine-strip,.kpis,.grid,.grid3,.grid4{grid-template-columns:1fr}.topActions{margin-left:0}header{flex-wrap:wrap}}
 </style>
 </head>
 <body>
@@ -69,53 +31,41 @@ table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--li
 </header>
 <main id="app"></main>
 <script>
-let me=null;let equiposCache=[];let ticketsCache=[];
+let me=null, activos=[], empleados=[], tecnicos=[], tickets=[], reportes=null, vista="panel";
 async function api(url,opts={}){const r=await fetch(url,opts);if(!r.ok){let e=await r.text();throw new Error(e)}return r.headers.get("content-type")?.includes("json")?r.json():r.text()}
-function fmt(d){return d?new Date(d).toLocaleString():""}function statusClass(s){return String(s||"").replaceAll(" ","")}
-function salir(){me=null;localStorage.removeItem("usuarioIBS");login()}function guardarSesion(){localStorage.setItem("usuarioIBS",JSON.stringify(me))}
-function cargarSesion(){try{const raw=localStorage.getItem("usuarioIBS");if(raw)me=JSON.parse(raw)}catch(e){localStorage.removeItem("usuarioIBS")}}
-function nav(){document.getElementById("mainHeader").style.display="flex";document.getElementById("topActions").innerHTML=`<button class="btn-gray" onclick="render()">Actualizar</button><button class="btn-dark" onclick="location.href='/api/export'">Exportar CSV</button><button class="btn-red" onclick="salir()">Salir</button>`}
+function fmt(d){return d?new Date(d).toLocaleString():""}function sc(s){return String(s||"").replaceAll(" ","").replace("ó","o")}
+function moneyMin(m){return `${m||0} min`}
+function guardarSesion(){localStorage.setItem("usuarioIBS",JSON.stringify(me))}function cargarSesion(){try{let r=localStorage.getItem("usuarioIBS");if(r)me=JSON.parse(r)}catch(e){localStorage.removeItem("usuarioIBS")}}
+function salir(){me=null;localStorage.removeItem("usuarioIBS");login()}
+function nav(){document.getElementById("mainHeader").style.display="flex";document.getElementById("topActions").innerHTML=`<button class="btn-gray" onclick="render()">Actualizar</button><button class="btn-dark" onclick="location.href='/api/export/excel'">Exportar Excel</button><button class="btn-red" onclick="salir()">Salir</button>`}
 function login(){document.getElementById("mainHeader").style.display="none";const app=document.getElementById("app");app.style.maxWidth="none";app.style.padding="0";app.innerHTML=`
-<section class="login-page">
-  <div class="login-left">
-    <div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas" onerror="this.style.display='none'; this.parentNode.innerHTML='<b style=&quot;color:#222;font-size:34px;font-style:italic&quot;>inter<span style=&quot;color:#ff6a00&quot;>bandas</span></b>'"></div>
-    <h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1>
-    <p class="login-subtitle">Control general de tickets, maquinaria, herramientas, tiempos muertos y reportes internos.</p>
-    <div class="machine-strip">
-      <div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Control de equipos industriales</small></div>
-      <div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario y seguimiento</small></div>
-      <div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div>
-      <div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Seguimiento y reportes</small></div>
-    </div>
-  </div>
-  <div class="login-right">
-    <div class="login-card">
-      <div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div>
-      <h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p>
-      <label>Usuario</label><input id="u" placeholder="Usuario" value="admin">
-      <label>Contraseña</label><input id="p" type="password" placeholder="Contraseña" value="1234">
-      <button class="btn-orange" onclick="doLogin()">Entrar al sistema</button>
-      <div class="login-footer">Interbandas · Mantenimiento IBS<br>Base de datos segura en Neon</div>
-    </div>
-  </div>
-</section>`}
+<section class="login-page"><div class="login-left"><div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas"></div><h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1><p class="login-subtitle">Control general de tickets, activos, empleados, tiempos muertos y reportes internos.</p><div class="machine-strip"><div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Activos industriales</small></div><div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario y seguimiento</small></div><div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div><div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Tiempos y reportes</small></div></div></div><div class="login-right"><div class="login-card"><div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div><h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p><label>Usuario</label><input id="u" value="admin"><label>Contraseña</label><input id="p" type="password" value="1234"><button class="btn-orange" onclick="doLogin()">Entrar al sistema</button><div class="login-footer">Interbandas · Mantenimiento IBS<br>Base de datos segura en Neon</div></div></div></section>`}
 async function doLogin(){try{const r=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u.value,password:p.value})});me=r.user;guardarSesion();render()}catch(e){alert("No entró: "+e.message)}}
-async function cargarDatos(){equiposCache=await api("/api/equipos");ticketsCache=await api("/api/tickets")}
-async function render(){if(!me){login();return}nav();document.getElementById("userLabel").textContent=`${me.name||me.username} · ${me.role||""}`;const app=document.getElementById("app");app.style.maxWidth="1250px";app.style.padding="18px";await cargarDatos();app.innerHTML=`
-<section class="hero"><h2>Panel de mantenimiento industrial</h2><p>Equipos, herramientas, reportes y seguimiento de fallas en tiempo real.</p></section>
-<section class="cards-machines">
-  <div class="area-card"><div class="ico">🏭</div><b>Maquinaria</b><span>Control de equipos industriales</span></div>
-  <div class="area-card"><div class="ico">🛠️</div><b>Herramientas</b><span>Inventario y uso de herramientas</span></div>
-  <div class="area-card"><div class="ico">📋</div><b>Mantenimiento</b><span>Gestión de tickets y fallas</span></div>
-  <div class="area-card"><div class="ico">📊</div><b>Control</b><span>Seguimiento y reportes</span></div>
-</section>
-${dashboard()}${ticketCard()}${equiposCard()}${tablaTickets()}`}
-function dashboard(){const total=ticketsCache.length;const abiertos=ticketsCache.filter(t=>t.estado!=="Liberado").length;const equipos=equiposCache.length;const reportados=ticketsCache.filter(t=>t.estado==="Reportado").length;return `<div class="kpis"><div class="kpi"><b>${total}</b>Tickets totales</div><div class="kpi"><b>${abiertos}</b>Tickets abiertos</div><div class="kpi"><b>${equipos}</b>Equipos/herramientas</div><div class="kpi"><b>${reportados}</b>Reportados</div></div>`}
-function ticketCard(){return `<div class="card"><h2>Reportar falla</h2><div class="grid"><div><label>Equipo / herramienta</label><select id="equipo">${equiposCache.map(e=>`<option value="${e.numero}|${e.descripcion}|${e.area||""}">${e.numero} · ${e.descripcion}</option>`).join("")}</select></div><div><label>Reporta</label><input id="reporta" placeholder="Nombre de quien solicita"></div></div><label>Falla detectada</label><textarea id="falla" placeholder="Describe la falla..."></textarea><button class="btn-orange" onclick="crearTicket()">Crear ticket</button></div>`}
-async function crearTicket(){try{const sel=document.getElementById("equipo").value.split("|");await api("/api/tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({equipo:sel[0],descripcion:sel[1],area:sel[2],reporta:document.getElementById("reporta").value,falla:document.getElementById("falla").value})});alert("Ticket creado");render()}catch(e){alert("Error al crear ticket: "+e.message)}}
-function equiposCard(){return `<div class="card"><h2>Agregar máquina / herramienta</h2><div class="grid"><input id="numeroEquipo" placeholder="Número de equipo"><input id="descripcionEquipo" placeholder="Descripción"><input id="areaEquipo" placeholder="Área"><select id="tipoEquipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select></div><button class="btn-orange" onclick="agregarEquipo()">Agregar equipo</button></div>`}
-async function agregarEquipo(){try{await api("/api/equipos",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({numero:document.getElementById("numeroEquipo").value,descripcion:document.getElementById("descripcionEquipo").value,area:document.getElementById("areaEquipo").value,tipo:document.getElementById("tipoEquipo").value})});alert("Equipo agregado");render()}catch(e){alert("Error al agregar equipo: "+e.message)}}
-function tablaTickets(){if(!ticketsCache.length)return `<div class="card"><h2>Tickets</h2><div class="empty">Sin tickets todavía.</div></div>`;return `<div class="card"><h2>Tickets registrados</h2><table><thead><tr><th>Ticket</th><th>Equipo</th><th>Área</th><th>Falla</th><th>Estado</th><th>Creado</th></tr></thead><tbody>${ticketsCache.map(t=>`<tr><td><b>${t.id}</b></td><td><b>${t.equipo||""}</b><br>${t.descripcion||""}</td><td>${t.area||""}</td><td>${t.falla||""}<br><span class="muted">Reporta: ${t.reporta||""}</span></td><td><span class="status ${statusClass(t.estado)}">${t.estado||"Reportado"}</span></td><td>${fmt(t.creado)}</td></tr>`).join("")}</tbody></table></div>`}
+async function loadAll(){const b=await api("/api/bootstrap");activos=b.activos;empleados=b.empleados;tecnicos=b.tecnicos;tickets=await api("/api/tickets");reportes=await api("/api/reportes")}
+async function render(){if(!me)return login();nav();document.getElementById("userLabel").textContent=`${me.name||me.username} · ${me.role||""}`;const app=document.getElementById("app");app.style.maxWidth="1350px";app.style.padding="18px";await loadAll();app.innerHTML=`${hero()}${tabs()}${vista==="panel"?panel():vista==="tickets"?ticketsView():vista==="activos"?activosView():vista==="empleados"?empleadosView():reportesView()}`}
+function hero(){return `<section class="hero"><h2>Panel de mantenimiento industrial</h2><p>Activos, empleados, reportes, tiempos muertos de MTTO y tiempos cargados a producción.</p></section>`}
+function tabs(){return `<div class="tabs"><button class="tab ${vista==="panel"?"active":""}" onclick="vista='panel';render()">Panel</button><button class="tab ${vista==="tickets"?"active":""}" onclick="vista='tickets';render()">Tickets</button><button class="tab ${vista==="activos"?"active":""}" onclick="vista='activos';render()">Activos</button><button class="tab ${vista==="empleados"?"active":""}" onclick="vista='empleados';render()">Empleados</button><button class="tab ${vista==="reportes"?"active":""}" onclick="vista='reportes';render()">Reportes</button></div>`}
+function kpis(){return `<div class="kpis"><div class="kpi"><b>${reportes.totalTickets}</b>Tickets</div><div class="kpi"><b>${reportes.abiertos}</b>Abiertos</div><div class="kpi"><b>${reportes.totalActivos}</b>Activos</div><div class="kpi"><b>${reportes.totalEmpleados}</b>Empleados</div><div class="kpi"><b>${moneyMin(reportes.mttoMin)}</b>Tiempo MTTO</div><div class="kpi"><b>${moneyMin(reportes.produccionMin)}</b>Tiempo Producción</div></div>`}
+function panel(){return `${kpis()}${crearTicketCard()}${tablaTickets(tickets.slice(0,10))}`}
+function crearTicketCard(){return `<div class="card"><h2>Reportar falla</h2><div class="grid3"><div><label>Activo / herramienta</label><select id="activoSel">${activos.map(a=>`<option value="${a.numero}|${a.descripcion}|${a.area||""}|${a.sucursal||""}">${a.numero} · ${a.descripcion}</option>`).join("")}</select></div><div><label>Solicitante</label><input id="solicitante" placeholder="Nombre de quien solicita"></div><div><label>Teléfono/extensión</label><input id="telSol" placeholder="Teléfono o extensión"></div><div><label>Prioridad</label><select id="prioridad"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div><div><label>Tipo de falla</label><select id="tipoFalla"><option>Mecánica</option><option>Eléctrica</option><option>Neumática</option><option>Ajuste</option><option>Operador</option><option>Otro</option></select></div><div><label>Número empleado</label><input id="empSol" placeholder="Opcional"></div></div><label>Falla detectada</label><textarea id="falla" placeholder="Describe la falla..."></textarea><button class="btn-orange" onclick="crearTicket()">Crear ticket</button></div>`}
+async function crearTicket(){try{const s=activoSel.value.split("|");await api("/api/tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({activo:s[0],activo_descripcion:s[1],area:s[2],sucursal:s[3],solicitante:solicitante.value,empleado_solicitante:empSol.value,telefono_solicitante:telSol.value,falla:falla.value,prioridad:prioridad.value,tipo_falla:tipoFalla.value})});alert("Ticket creado");render()}catch(e){alert("Error: "+e.message)}}
+function ticketsView(){return `${crearTicketCard()}${tablaTickets(tickets)}`}
+function acciones(t){let html="";if(t.estado==="Reportado")html+=`<select id="tec_${t.id}">${tecnicos.map(x=>`<option value="${x.username}">${x.name}</option>`).join("")}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar</button>`;if(t.estado==="Asignado")html+=`<button class="btn-blue" onclick="iniciar('${t.id}')">Iniciar</button>`;if(t.estado==="En atención")html+=`<textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea><textarea id="sol_${t.id}" placeholder="Solución"></textarea><button class="btn-green" onclick="terminar('${t.id}')">Terminar reparación</button>`;if(t.estado==="Pendiente validación")html+=`<button class="btn-green" onclick="liberar('${t.id}')">Liberar</button><button class="btn-red" onclick="devolver('${t.id}')">Devolver</button>`;return html||"<span class='muted'>Sin acciones</span>"}
+async function asignar(id){await api(`/api/tickets/${id}/asignar`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tecnico_username:document.getElementById("tec_"+id).value})});render()}
+async function iniciar(id){await api(`/api/tickets/${id}/iniciar`,{method:"POST"});render()}
+async function terminar(id){await api(`/api/tickets/${id}/terminar`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({diagnostico:document.getElementById("diag_"+id).value,solucion:document.getElementById("sol_"+id).value})});render()}
+async function liberar(id){await api(`/api/tickets/${id}/liberar`,{method:"POST"});render()}
+async function devolver(id){await api(`/api/tickets/${id}/devolver`,{method:"POST"});render()}
+function tablaTickets(rows){if(!rows.length)return `<div class="card"><h2>Tickets</h2><div class="empty">Sin tickets.</div></div>`;return `<div class="card"><h2>Tickets</h2><table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${t.prioridad||""}</td><td><b>${t.activo}</b><br>${t.activo_descripcion}<br>${t.area||""}</td><td>${t.falla}<br><span class="muted">Solicita: ${t.solicitante||""}</span><br><span class="muted">${t.tipo_falla||""}</span></td><td><span class="status ${sc(t.estado)}">${t.estado}</span><br><span class="muted">${t.responsableActual}</span></td><td>MTTO: <b>${t.tiempos.mttoMin}</b> min<br>Producción: <b>${t.tiempos.produccionMin}</b> min<br>Total: <b>${t.tiempos.muertoTotalMin}</b> min</td><td>${acciones(t)}</td></tr>`).join("")}</tbody></table></div>`}
+function activosView(){return `<div class="card"><h2>Importar activos desde Excel</h2><p class="muted">Columnas aceptadas: numero, descripcion, area, tipo, sucursal, ubicacion, marca, modelo, serie, estado.</p><input type="file" id="excelActivos" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/activos','excelActivos')">Importar activos</button></div><div class="card"><h2>Agregar activo manual</h2><div class="grid4"><input id="aNum" placeholder="Número"><input id="aDesc" placeholder="Descripción"><input id="aArea" placeholder="Área"><select id="aTipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select></div><button class="btn-orange" onclick="agregarActivo()">Agregar</button></div>${tablaActivos()}`}
+async function importar(endpoint,inputId){try{let file=document.getElementById(inputId).files[0];if(!file)return alert("Selecciona un Excel");let fd=new FormData();fd.append("archivo",file);let r=await api(endpoint,{method:"POST",body:fd});alert(`Importado\nAgregados: ${r.agregados}\nActualizados: ${r.actualizados}\nOmitidos: ${r.omitidos}`);render()}catch(e){alert("Error: "+e.message)}}
+async function agregarActivo(){await api("/api/activos",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({numero:aNum.value,descripcion:aDesc.value,area:aArea.value,tipo:aTipo.value})});render()}
+function tablaActivos(){return `<div class="card"><h2>Activos</h2><table><thead><tr><th>Número</th><th>Descripción</th><th>Área</th><th>Tipo</th><th>Sucursal</th></tr></thead><tbody>${activos.map(a=>`<tr><td><b>${a.numero}</b></td><td>${a.descripcion}</td><td>${a.area||""}</td><td>${a.tipo||""}</td><td>${a.sucursal||""}</td></tr>`).join("")}</tbody></table></div>`}
+function empleadosView(){return `<div class="card"><h2>Importar empleados desde Excel</h2><p class="muted">Columnas aceptadas: numeroEmpleado, nombre, usuario, password, rol, sucursal, areaAsignada, telefono, correo.</p><input type="file" id="excelEmpleados" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/empleados','excelEmpleados')">Importar empleados</button></div><div class="card"><h2>Agregar empleado manual</h2><div class="grid4"><input id="eUser" placeholder="Usuario"><input id="eName" placeholder="Nombre"><input id="ePass" placeholder="Contraseña" value="1234"><select id="eRole"><option value="operaciones">operaciones</option><option value="tecnico">tecnico</option><option value="gerente">gerente</option><option value="admin">admin</option></select></div><button class="btn-orange" onclick="agregarEmpleado()">Agregar</button></div>${tablaEmpleados()}`}
+async function agregarEmpleado(){await api("/api/empleados",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:eUser.value,name:eName.value,password:ePass.value,role:eRole.value})});render()}
+function tablaEmpleados(){return `<div class="card"><h2>Empleados</h2><table><thead><tr><th>Empleado</th><th>Usuario</th><th>Rol</th><th>Área</th><th>Teléfono</th><th>Correo</th></tr></thead><tbody>${empleados.map(e=>`<tr><td><b>${e.name}</b><br>${e.numero_empleado||""}</td><td>${e.username}</td><td>${e.role}</td><td>${e.area_asignada||""}</td><td>${e.telefono||""}</td><td>${e.correo||""}</td></tr>`).join("")}</tbody></table></div>`}
+function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Tiempos muertos</h2><p><b>Tiempo cargado a MTTO:</b> ${reportes.mttoMin} min</p><div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div><p><b>Tiempo cargado a Producción:</b> ${reportes.produccionMin} min</p><div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats("Por estado",reportes.porEstado)}${simpleStats("Por área",reportes.porArea)}${simpleStats("Por tipo de falla",reportes.porTipoFalla)}</div>${tablaTickets(tickets)}`}
+function simpleStats(title,obj){return `<div class="card"><h2>${title}</h2>${Object.keys(obj||{}).map(k=>`<p><b>${k}</b>: ${obj[k]}</p>`).join("")||"<p class='muted'>Sin datos</p>"}</div>`}
 cargarSesion();if(me)render();else login();
 </script>
 </body>
