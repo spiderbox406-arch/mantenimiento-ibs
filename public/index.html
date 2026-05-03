@@ -4,12 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MANTENIMIENTO IBS</title>
-
 <style>
 :root{
   --orange:#ff6a00;
-  --dark:#242424;
-  --black:#111;
+  --orange2:#ff8a2a;
+  --black:#101010;
+  --dark:#1f2328;
+  --panel:#ffffff;
   --line:#d8dde3;
   --bg:#eef1f4;
   --green:#0f8a4b;
@@ -17,969 +18,105 @@
   --red:#b42318;
   --yellow:#b7791f;
 }
-
 *{box-sizing:border-box}
-
-body{
-  margin:0;
-  font-family:Arial,Helvetica,sans-serif;
-  background:var(--bg);
-  color:var(--dark);
-}
-
-header{
-  background:white;
-  border-bottom:1px solid var(--line);
-  padding:16px 20px;
-  display:flex;
-  align-items:center;
-  gap:14px;
-  position:sticky;
-  top:0;
-  z-index:3;
-}
-
-.logo{
-  width:56px;
-  height:56px;
-  border:4px solid var(--orange);
-  border-radius:14px;
-  display:grid;
-  place-items:center;
-  font-weight:900;
-  color:var(--orange);
-}
-
-main{
-  padding:18px;
-  max-width:1250px;
-  margin:auto;
-}
-
-.card{
-  background:white;
-  border:1px solid var(--line);
-  border-radius:22px;
-  padding:18px;
-  margin-bottom:16px;
-  box-shadow:0 6px 18px #0001;
-}
-
-button{
-  border:0;
-  border-radius:14px;
-  padding:12px 16px;
-  font-weight:900;
-  font-size:15px;
-  cursor:pointer;
-  margin:4px;
-}
-
-.btn-orange{background:var(--orange);color:white}
-.btn-dark{background:var(--dark);color:white}
-.btn-green{background:var(--green);color:white}
-.btn-blue{background:var(--blue);color:white}
-.btn-red{background:var(--red);color:white}
-.btn-gray{background:#666;color:white}
-
-input,select,textarea{
-  width:100%;
-  border:1px solid var(--line);
-  border-radius:14px;
-  padding:12px;
-  font-size:16px;
-  background:white;
-}
-
-textarea{min-height:80px}
-
-label{
-  font-weight:900;
-  font-size:13px;
-  color:#555;
-  display:block;
-  margin:10px 0 5px;
-}
-
-.grid{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:14px;
-}
-
-.grid3{
-  display:grid;
-  grid-template-columns:repeat(3,1fr);
-  gap:14px;
-}
-
-.status{
-  display:inline-block;
-  color:white;
-  border-radius:999px;
-  padding:7px 10px;
-  font-weight:900;
-  font-size:12px;
-}
-
-.Reportado{background:var(--red)}
-.Asignado{background:var(--yellow)}
-.EnAtencion{background:var(--blue)}
-.PendienteValidacion{background:#6b46c1}
-.Devuelto{background:#97266d}
-.Liberado{background:var(--green)}
-
-table{
-  width:100%;
-  border-collapse:collapse;
-}
-
-th,td{
-  border-bottom:1px solid var(--line);
-  padding:10px;
-  text-align:left;
-  vertical-align:top;
-  font-size:14px;
-}
-
-th{background:#f8fafc}
-
-.alert{
-  border:2px solid var(--orange);
-  background:#fff5e8;
-  border-radius:18px;
-  padding:16px;
-  margin-bottom:14px;
-}
-
-.kpis{
-  display:grid;
-  grid-template-columns:repeat(4,1fr);
-  gap:12px;
-}
-
-.kpi{
-  background:#f8fafc;
-  border:1px solid var(--line);
-  border-radius:18px;
-  padding:16px;
-}
-
-.kpi b{
-  font-size:28px;
-  display:block;
-}
-
-.photo{
-  height:62px;
-  border-radius:8px;
-  margin:4px;
-  border:1px solid var(--line);
-}
-
-.muted{
-  color:#666;
-  font-size:13px;
-}
-
-.topActions{
-  margin-left:auto;
-}
-
-/* LOGIN NUEVO */
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--dark)}
+button{border:0;border-radius:14px;padding:12px 16px;font-weight:900;font-size:15px;cursor:pointer;margin:4px}
+.btn-orange{background:var(--orange);color:white}.btn-dark{background:var(--dark);color:white}.btn-green{background:var(--green);color:white}.btn-blue{background:var(--blue);color:white}.btn-red{background:var(--red);color:white}.btn-gray{background:#666;color:white}
+input,select,textarea{width:100%;border:1px solid var(--line);border-radius:14px;padding:12px;font-size:16px;background:white}
+textarea{min-height:90px;resize:vertical}
+label{font-weight:900;font-size:13px;color:#555;display:block;margin:10px 0 5px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.muted{color:#666;font-size:13px}
 .login-page{
   min-height:100vh;
   display:grid;
-  grid-template-columns:1.15fr .85fr;
+  grid-template-columns:1.1fr .9fr;
   background:
-    linear-gradient(90deg,rgba(0,0,0,.88),rgba(0,0,0,.68),rgba(0,0,0,.25)),
-    url("https://images.unsplash.com/photo-1581092580497-e0d23cbdf1dc?auto=format&fit=crop&w=1600&q=80");
-  background-size:cover;
-  background-position:center;
+    radial-gradient(circle at 20% 20%, rgba(255,106,0,.35), transparent 28%),
+    linear-gradient(90deg,rgba(0,0,0,.92),rgba(0,0,0,.78),rgba(0,0,0,.46)),
+    url("https://images.unsplash.com/photo-1581092580497-e0d23cbdf1dc?auto=format&fit=crop&w=1800&q=80");
+  background-size:cover;background-position:center;
 }
-
-.login-left{
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  padding:70px;
-  color:white;
-}
-
-.brand-box{
-  display:inline-flex;
-  align-items:center;
-  gap:12px;
-  background:#fff;
-  color:#222;
-  padding:10px 18px;
-  border-radius:14px;
-  width:max-content;
-  border:4px solid var(--orange);
-  box-shadow:0 10px 30px #0007;
-  font-size:28px;
-  font-weight:900;
-  font-style:italic;
-  margin-bottom:35px;
-}
-
-.brand-box span{
-  color:var(--orange);
-}
-
-.login-title{
-  font-size:54px;
-  line-height:1;
-  margin:0 0 18px;
-  font-weight:900;
-}
-
-.login-title strong{
-  color:var(--orange);
-}
-
-.login-subtitle{
-  font-size:20px;
-  color:#ddd;
-  max-width:680px;
-  line-height:1.5;
-}
-
-.login-badges{
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  margin-top:28px;
-}
-
-.login-badge{
-  padding:10px 14px;
-  border-radius:999px;
-  background:rgba(255,255,255,.12);
-  border:1px solid rgba(255,255,255,.18);
-  font-weight:800;
-  color:#fff;
-}
-
-.login-right{
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  padding:30px;
-}
-
-.login-card{
-  width:100%;
-  max-width:410px;
-  background:rgba(255,255,255,.96);
-  border-radius:26px;
-  padding:30px;
-  box-shadow:0 25px 70px #0009;
-  border-top:8px solid var(--orange);
-}
-
-.login-card h2{
-  margin:0;
-  font-size:28px;
-}
-
-.login-card p{
-  color:#666;
-  margin:8px 0 20px;
-}
-
-.login-card input{
-  background:#f7f7f7;
-  border:1px solid #ddd;
-}
-
-.login-card button{
-  width:100%;
-  margin:14px 0 0;
-  font-size:17px;
-  padding:14px;
-}
-
-.login-footer{
-  margin-top:18px;
-  font-size:12px;
-  color:#777;
-  text-align:center;
-}
-
-.system-online{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-size:13px;
-  color:#0f8a4b;
-  font-weight:900;
-  margin-bottom:14px;
-}
-
-.dot-online{
-  width:10px;
-  height:10px;
-  border-radius:50%;
-  background:#0f8a4b;
-  box-shadow:0 0 0 5px rgba(15,138,75,.12);
-}
-
-@media(max-width:900px){
-  .login-page{
-    grid-template-columns:1fr;
-  }
-
-  .login-left{
-    padding:36px 24px 10px;
-  }
-
-  .login-title{
-    font-size:38px;
-  }
-
-  .login-subtitle{
-    font-size:16px;
-  }
-
-  .login-right{
-    padding:20px;
-  }
-
-  .brand-box{
-    font-size:22px;
-  }
-}
-
-@media(max-width:800px){
-  .grid,.grid3,.kpis{
-    grid-template-columns:1fr;
-  }
-
-  table{
-    font-size:12px;
-  }
-
-  header{
-    align-items:flex-start;
-  }
-
-  .topActions{
-    margin-left:0;
-  }
-}
+.login-left{display:flex;flex-direction:column;justify-content:center;padding:70px;color:white;position:relative}
+.ibs-logo-wrap{background:white;border:4px solid var(--orange);border-radius:18px;padding:10px 18px;width:max-content;max-width:390px;box-shadow:0 18px 55px #0008;margin-bottom:34px}
+.ibs-logo-wrap img{display:block;width:290px;max-width:75vw;height:auto}
+.login-title{font-size:56px;line-height:1;margin:0 0 16px;font-weight:900;letter-spacing:-1.5px}
+.login-title strong{color:var(--orange)}
+.login-subtitle{font-size:20px;color:#e5e5e5;max-width:720px;line-height:1.48}
+.machine-strip{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:12px;max-width:760px;margin-top:28px}
+.machine-card{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(5px);border-radius:18px;padding:16px;box-shadow:0 14px 40px #0005}
+.machine-card .ico{font-size:34px;display:block;margin-bottom:8px}.machine-card b{display:block;color:white}.machine-card small{display:block;color:#ccc;margin-top:5px}
+.login-right{display:flex;align-items:center;justify-content:center;padding:30px;z-index:1}
+.login-card{width:100%;max-width:430px;background:rgba(255,255,255,.97);border-radius:28px;padding:30px;box-shadow:0 26px 80px #000a;border-top:9px solid var(--orange)}
+.system-online{display:flex;align-items:center;gap:8px;font-size:13px;color:#0f8a4b;font-weight:900;margin-bottom:14px}
+.dot-online{width:10px;height:10px;border-radius:50%;background:#0f8a4b;box-shadow:0 0 0 5px rgba(15,138,75,.12)}
+.login-card h2{margin:0;font-size:30px}.login-card p{color:#666;margin:8px 0 20px}.login-card input{background:#f7f7f7;border:1px solid #ddd}.login-card button{width:100%;margin:14px 0 0;font-size:17px;padding:14px}.login-footer{text-align:center;margin-top:18px;font-size:12px;color:#777}
+header{background:#111;color:white;padding:14px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10;border-bottom:4px solid var(--orange);box-shadow:0 7px 22px #0003}
+.header-logo{background:white;border:3px solid var(--orange);border-radius:14px;padding:6px 10px}.header-logo img{width:190px;max-width:45vw;display:block}.header-title h1{margin:0;font-size:24px}.header-title div{font-size:13px;color:#bbb}.topActions{margin-left:auto;display:flex;flex-wrap:wrap;gap:5px}
+main{padding:18px;max-width:1250px;margin:auto}.hero{background:linear-gradient(120deg,#111 0%,#222 46%,rgba(255,106,0,.88) 100%);color:white;border-radius:26px;padding:24px;margin-bottom:16px;box-shadow:0 13px 35px #0002;overflow:hidden;position:relative}.hero:after{content:"⚙️";position:absolute;right:35px;top:15px;font-size:120px;opacity:.12}.hero h2{margin:0 0 8px;font-size:32px}.hero p{margin:0;color:#e9e9e9}
+.cards-machines{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}.area-card{background:white;border:1px solid var(--line);border-radius:20px;padding:18px;box-shadow:0 6px 18px #0001;border-left:7px solid var(--orange)}.area-card .ico{font-size:36px;margin-bottom:8px}.area-card b{display:block;font-size:17px}.area-card span{font-size:13px;color:#666}
+.card{background:white;border:1px solid var(--line);border-radius:22px;padding:18px;margin-bottom:16px;box-shadow:0 6px 18px #0001}.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}.kpi{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 6px 18px #0001}.kpi b{font-size:30px;display:block;color:var(--orange)}
+.status{display:inline-block;color:white;border-radius:999px;padding:7px 10px;font-weight:900;font-size:12px}.Reportado{background:var(--red)}.Liberado{background:var(--green)}
+table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top;font-size:14px}th{background:#f8fafc}.empty{padding:22px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:18px;color:#666}
+@media(max-width:950px){.login-page{grid-template-columns:1fr}.login-left{padding:35px 24px 10px}.login-title{font-size:40px}.login-subtitle{font-size:16px}.machine-strip{grid-template-columns:1fr 1fr}.cards-machines,.kpis,.grid,.grid3{grid-template-columns:1fr}.topActions{margin-left:0}header{align-items:flex-start;flex-wrap:wrap}}
 </style>
 </head>
-
 <body>
-
-<header id="mainHeader">
-  <div class="logo">IBS</div>
-  <div>
-    <h1 style="margin:0">MANTENIMIENTO IBS</h1>
-    <div id="userLabel" class="muted">Sistema interno</div>
-  </div>
+<header id="mainHeader" style="display:none">
+  <div class="header-logo"><img src="/logo-interbandas.png" alt="Interbandas" onerror="this.style.display='none'; this.parentNode.innerHTML='<b style=&quot;color:#ff6a00;font-size:24px&quot;>interbandas</b>'"></div>
+  <div class="header-title"><h1>MANTENIMIENTO IBS</h1><div id="userLabel">Sistema interno</div></div>
   <div id="topActions" class="topActions"></div>
 </header>
-
 <main id="app"></main>
-
 <script>
-let me=null, boot=null;
-
-async function api(url,opts={}){
-  const r=await fetch(url,opts);
-  if(!r.ok){
-    let e=await r.text();
-    throw new Error(e);
-  }
-  return r.headers.get("content-type")?.includes("json")?r.json():r.text();
-}
-
-function fmt(d){
-  return d?new Date(d).toLocaleString():"";
-}
-
-function min(a,b){
-  return a&&b?Math.round((new Date(b)-new Date(a))/60000):"";
-}
-
-function stClass(s){
-  return s.replaceAll(" ","").replace("atención","Atencion").replace("validación","Validacion");
-}
-
-function msgWhats(t){
-  return encodeURIComponent(
-    `Alerta mantenimiento\n\nTicket: ${t.id}\nEquipo: ${t.equipo}\nÁrea: ${t.area}\nFalla: ${t.falla}\nEstado: ${t.estado}\nTécnico: ${t.tecnicoName||"Sin asignar"}\nHora: ${fmt(t.creado)}`
-  );
-}
-
-function waNumberFor(t){
-  if(t.tecnicoUsername && boot.config.whatsappTecnicos?.[t.tecnicoUsername]) return boot.config.whatsappTecnicos[t.tecnicoUsername];
-  return boot.config.whatsappGerente || "";
-}
-
-function abrirWA(t){
-  let num=waNumberFor(t).replace(/[^0-9]/g,"");
-  if(!num){
-    alert("Falta configurar WhatsApp en ADMIN");
-    return;
-  }
-  window.open(`https://wa.me/${num}?text=${msgWhats(t)}`,"_blank");
-}
-
-function nav(){
-  document.getElementById("mainHeader").style.display="flex";
-  document.getElementById("topActions").innerHTML=`
-    <button class="btn-gray" onclick="render()">Actualizar</button>
-    <button class="btn-dark" onclick="location.href='/api/export'">Exportar CSV</button>
-    <button class="btn-red" onclick="salir()">Salir</button>
-  `;
-}
-
-function salir(){
-  me=null;
-  boot=null;
-  document.getElementById("topActions").innerHTML="";
-  document.getElementById("userLabel").textContent="Sistema interno";
-  login();
-}
-
-async function login(){
-  document.getElementById("mainHeader").style.display="none";
-
-  document.getElementById("app").style.maxWidth="none";
-  document.getElementById("app").style.padding="0";
-
-  document.getElementById("app").innerHTML=`
-    <section class="login-page">
-      <div class="login-left">
-        <div class="brand-box">
-          inter<span>bandas</span>
-        </div>
-
-        <h1 class="login-title">
-          Sistema de <strong>Mantenimiento</strong> IBS
-        </h1>
-
-        <p class="login-subtitle">
-          Control de tickets, equipos, herramientas, tiempos muertos y seguimiento de mantenimiento correctivo.
-        </p>
-
-        <div class="login-badges">
-          <div class="login-badge">Operaciones</div>
-          <div class="login-badge">Técnicos</div>
-          <div class="login-badge">Gerencia MTTO</div>
-          <div class="login-badge">Equipos y herramientas</div>
-        </div>
-      </div>
-
-      <div class="login-right">
-        <div class="login-card">
-          <div class="system-online">
-            <span class="dot-online"></span>
-            Sistema en línea
-          </div>
-
-          <h2>Ingresar</h2>
-          <p>Acceso interno para personal autorizado.</p>
-
-          <label>Usuario</label>
-          <input id="u" placeholder="Usuario" value="admin">
-
-          <label>Contraseña</label>
-          <input id="p" type="password" placeholder="Contraseña" value="1234">
-
-          <button class="btn-orange" onclick="doLogin()">Entrar</button>
-
-          <div class="login-footer">
-            Interbandas · Mantenimiento IBS<br>
-            Demo: admin/1234 · operaciones/1234 · gerente/1234
-          </div>
-        </div>
-      </div>
-    </section>
-  `;
-}
-
-async function doLogin(){
-  try{
-    let r=await api("/api/login",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        username:u.value,
-        password:p.value
-      })
-    });
-
-    me=r.user;
-    boot=await api("/api/bootstrap");
-
-    document.getElementById("app").style.maxWidth="1250px";
-    document.getElementById("app").style.padding="18px";
-    document.getElementById("userLabel").textContent=`${me.name} · ${me.role}`;
-
-    render();
-
-  }catch(e){
-    alert("No entró: "+e.message);
-  }
-}
-
-async function tickets(){
-  return api(`/api/tickets?role=${me.role}&username=${me.username}`);
-}
-
-async function render(){
-  if(!me)return login();
-
-  nav();
-  boot=await api("/api/bootstrap");
-
-  if(me.role==="admin")return renderAdmin();
-  if(me.role==="operaciones")return renderOperaciones();
-  if(me.role==="gerente")return renderGerente();
-  if(me.role==="tecnico")return renderTecnico();
-}
-
-async function renderOperaciones(){
-  let t=await tickets();
-
-  document.getElementById("app").innerHTML=`
-    <div class="card">
-      <h2>Operaciones · Reportar falla</h2>
-
-      <div class="grid">
-        <div>
-          <label>Equipo</label>
-          <select id="equipo">
-            ${boot.equipos.map(e=>`<option value="${e.num}|${e.desc}|${e.area}|${e.tipo||""}">${e.num} · ${e.desc}</option>`).join("")}
-          </select>
-        </div>
-
-        <div>
-          <label>Reporta</label>
-          <input id="reporta" placeholder="Nombre">
-        </div>
-
-        <div>
-          <label>Prioridad</label>
-          <select id="prioridad">
-            <option>Normal</option>
-            <option>Alta</option>
-            <option>Urgente</option>
-          </select>
-        </div>
-
-        <div>
-          <label>Fotos</label>
-          <input id="fotos" type="file" accept="image/*" multiple>
-        </div>
-      </div>
-
-      <label>Falla</label>
-      <textarea id="falla"></textarea>
-
-      <button class="btn-orange" onclick="crearTicket()">Enviar y alertar a mantenimiento</button>
+let me=null;let equiposCache=[];let ticketsCache=[];
+async function api(url,opts={}){const r=await fetch(url,opts);if(!r.ok){let e=await r.text();throw new Error(e)}return r.headers.get("content-type")?.includes("json")?r.json():r.text()}
+function fmt(d){return d?new Date(d).toLocaleString():""}function statusClass(s){return String(s||"").replaceAll(" ","")}
+function salir(){me=null;localStorage.removeItem("usuarioIBS");login()}function guardarSesion(){localStorage.setItem("usuarioIBS",JSON.stringify(me))}
+function cargarSesion(){try{const raw=localStorage.getItem("usuarioIBS");if(raw)me=JSON.parse(raw)}catch(e){localStorage.removeItem("usuarioIBS")}}
+function nav(){document.getElementById("mainHeader").style.display="flex";document.getElementById("topActions").innerHTML=`<button class="btn-gray" onclick="render()">Actualizar</button><button class="btn-dark" onclick="location.href='/api/export'">Exportar CSV</button><button class="btn-red" onclick="salir()">Salir</button>`}
+function login(){document.getElementById("mainHeader").style.display="none";const app=document.getElementById("app");app.style.maxWidth="none";app.style.padding="0";app.innerHTML=`
+<section class="login-page">
+  <div class="login-left">
+    <div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas" onerror="this.style.display='none'; this.parentNode.innerHTML='<b style=&quot;color:#222;font-size:34px;font-style:italic&quot;>inter<span style=&quot;color:#ff6a00&quot;>bandas</span></b>'"></div>
+    <h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1>
+    <p class="login-subtitle">Control general de tickets, maquinaria, herramientas, tiempos muertos y reportes internos.</p>
+    <div class="machine-strip">
+      <div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Control de equipos industriales</small></div>
+      <div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario y seguimiento</small></div>
+      <div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div>
+      <div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Seguimiento y reportes</small></div>
     </div>
-
-    <div class="card">
-      <h2>Mis reportes / validación</h2>
-      ${tabla(t)}
+  </div>
+  <div class="login-right">
+    <div class="login-card">
+      <div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div>
+      <h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p>
+      <label>Usuario</label><input id="u" placeholder="Usuario" value="admin">
+      <label>Contraseña</label><input id="p" type="password" placeholder="Contraseña" value="1234">
+      <button class="btn-orange" onclick="doLogin()">Entrar al sistema</button>
+      <div class="login-footer">Interbandas · Mantenimiento IBS<br>Base de datos segura en Neon</div>
     </div>
-  `;
-}
-
-async function crearTicket(){
-  let [equipo,desc,area,tipo]=document.getElementById("equipo").value.split("|");
-
-  let fd=new FormData();
-  fd.append("equipo",equipo);
-  fd.append("descripcionEquipo",desc);
-  fd.append("area",area);
-  fd.append("tipoEquipo",tipo);
-  fd.append("reporta",reporta.value);
-  fd.append("prioridad",prioridad.value);
-  fd.append("falla",falla.value);
-  fd.append("createdBy",me.username);
-
-  [...fotos.files].forEach(f=>fd.append("fotos",f));
-
-  let t=await api("/api/tickets",{method:"POST",body:fd});
-  abrirWA(t);
-  render();
-}
-
-async function renderGerente(){
-  let t=await tickets();
-  let nuevos=t.filter(x=>x.estado==="Reportado");
-
-  document.getElementById("app").innerHTML=`
-    ${nuevos.length?`
-      <div class="alert">
-        <h2>⚠️ Nuevos reportes: ${nuevos.length}</h2>
-        ${nuevos.map(x=>`<b>${x.equipo}</b> · ${x.falla}<br>`).join("")}
-      </div>
-    `:""}
-
-    <div class="card">
-      <h2>Gerente MTTO · Asignar técnico</h2>
-      ${tabla(t)}
-    </div>
-  `;
-}
-
-async function renderTecnico(){
-  let t=await tickets();
-  let asignados=t.filter(x=>x.estado==="Asignado");
-
-  document.getElementById("app").innerHTML=`
-    ${asignados.length?`
-      <div class="alert">
-        <h2>🔔 Alertas asignadas: ${asignados.length}</h2>
-        ${asignados.map(x=>`<b>${x.equipo}</b> · ${x.falla}<br>`).join("")}
-      </div>
-    `:""}
-
-    <div class="card">
-      <h2>Personal MTTO · Mis tickets</h2>
-      ${tabla(t)}
-    </div>
-  `;
-}
-
-async function renderAdmin(){
-  let t=await tickets();
-  let nuevos=t.filter(x=>x.estado==="Reportado");
-
-  document.getElementById("app").innerHTML=`
-    ${nuevos.length?`
-      <div class="alert">
-        <h2>⚠️ Nuevos reportes: ${nuevos.length}</h2>
-        ${nuevos.map(x=>`<b>${x.equipo}</b> · ${x.falla}<br>`).join("")}
-      </div>
-    `:""}
-
-    <div class="card">
-      <h2>ADMIN · Control general</h2>
-      ${dashboard(t)}
-      ${tabla(t)}
-    </div>
-
-    ${configCard()}
-    ${usuariosCard()}
-    ${equiposCard()}
-  `;
-}
-
-function dashboard(t){
-  let abiertos=t.filter(x=>x.estado!=="Liberado").length;
-  let lib=t.filter(x=>x.estado==="Liberado").length;
-  let muerto=t.reduce((s,x)=>s+(min(x.creado,x.liberado||new Date().toISOString())||0),0);
-
-  return `
-    <div class="kpis">
-      <div class="kpi"><b>${t.length}</b>Total</div>
-      <div class="kpi"><b>${abiertos}</b>Abiertos</div>
-      <div class="kpi"><b>${lib}</b>Liberados</div>
-      <div class="kpi"><b>${muerto}</b>Min muertos</div>
-    </div>
-    <br>
-  `;
-}
-
-function configCard(){
-  return `
-    <div class="card">
-      <h2>Configurar WhatsApp</h2>
-
-      <label>Gerente / supervisor MTTO</label>
-      <input id="waGer" value="${boot.config.whatsappGerente||""}" placeholder="+52...">
-
-      <h3>Técnicos</h3>
-
-      ${boot.tecnicos.map(te=>`
-        <label>${te.name}</label>
-        <input id="wa_${te.username}" value="${boot.config.whatsappTecnicos?.[te.username]||""}" placeholder="+52...">
-      `).join("")}
-
-      <button class="btn-orange" onclick="guardarConfig()">Guardar WhatsApp</button>
-    </div>
-  `;
-}
-
-function usuariosCard(){
-  return `
-    <div class="card">
-      <h2>Usuarios</h2>
-
-      <div class="grid3">
-        <input id="nu" placeholder="usuario">
-        <input id="np" placeholder="contraseña">
-
-        <select id="nr">
-          <option value="operaciones">operaciones</option>
-          <option value="gerente">gerente</option>
-          <option value="tecnico">tecnico</option>
-          <option value="admin">admin</option>
-        </select>
-      </div>
-
-      <input id="nn" placeholder="nombre">
-
-      <button class="btn-orange" onclick="addUser()">Agregar usuario</button>
-
-      <br><br>
-
-      ${boot.users.map(u=>`
-        ${u.name} · ${u.username} · ${u.role}
-        ${u.username==="admin"?"":`<button class='btn-red' onclick="delUser('${u.username}')">Borrar</button>`}
-        <br>
-      `).join("")}
-    </div>
-  `;
-}
-
-function equiposCard(){
-  return `
-    <div class="card">
-      <h2>Máquinas / herramientas</h2>
-
-      <div class="grid">
-        <input id="en" placeholder="Número equipo">
-        <input id="ed" placeholder="Descripción">
-        <input id="ea" placeholder="Área">
-
-        <select id="et">
-          <option>Máquina</option>
-          <option>Herramienta</option>
-          <option>Equipo</option>
-        </select>
-      </div>
-
-      <button class="btn-orange" onclick="addEquipo()">Agregar</button>
-
-      <br><br>
-
-      ${boot.equipos.map(e=>`
-        ${e.num} · ${e.desc} · ${e.area}
-        <button class='btn-red' onclick="delEquipo('${e.num}')">Borrar</button>
-        <br>
-      `).join("")}
-    </div>
-  `;
-}
-
-async function guardarConfig(){
-  let cfg={
-    whatsappGerente:waGer.value,
-    whatsappTecnicos:{}
-  };
-
-  boot.tecnicos.forEach(te=>{
-    cfg.whatsappTecnicos[te.username]=document.getElementById("wa_"+te.username).value;
-  });
-
-  await api("/api/config",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(cfg)
-  });
-
-  alert("Guardado");
-  render();
-}
-
-async function addUser(){
-  await api("/api/users",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      username:nu.value,
-      password:np.value,
-      role:nr.value,
-      name:nn.value
-    })
-  });
-
-  render();
-}
-
-async function delUser(u){
-  if(confirm("¿Borrar usuario "+u+"?")){
-    await api("/api/users/"+u,{method:"DELETE"});
-    render();
-  }
-}
-
-async function addEquipo(){
-  await api("/api/equipos",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      num:en.value,
-      desc:ed.value,
-      area:ea.value,
-      tipo:et.value
-    })
-  });
-
-  render();
-}
-
-async function delEquipo(n){
-  if(confirm("¿Borrar equipo "+n+"?")){
-    await api("/api/equipos/"+encodeURIComponent(n),{method:"DELETE"});
-    render();
-  }
-}
-
-function tabla(t){
-  if(!t.length)return"<p class='muted'>Sin tickets.</p>";
-
-  return `
-    <table>
-      <thead>
-        <tr>
-          <th>Ticket</th>
-          <th>Equipo</th>
-          <th>Estado</th>
-          <th>Tiempos</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-
-      <tbody>
-        ${t.map(x=>`
-          <tr>
-            <td>
-              <b>${x.id}</b><br>
-              ${fmt(x.creado)}<br>
-              ${x.prioridad}
-            </td>
-
-            <td>
-              <b>${x.equipo}</b><br>
-              ${x.descripcionEquipo}<br>
-              ${x.area}<br>
-              ${x.falla}<br>
-              ${fotosHtml(x)}
-            </td>
-
-            <td>
-              <span class="status ${stClass(x.estado)}">${x.estado}</span><br>
-              Técnico: ${x.tecnicoName||"Sin asignar"}
-            </td>
-
-            <td>
-              Espera: ${min(x.creado,x.inicio||x.asignado)} min<br>
-              Reparación: ${min(x.inicio,x.finTecnico)} min<br>
-              Muerto total: ${min(x.creado,x.liberado||new Date().toISOString())} min
-            </td>
-
-            <td>${acciones(x)}</td>
-          </tr>
-        `).join("")}
-      </tbody>
-    </table>
-  `;
-}
-
-function fotosHtml(x){
-  let f=[...(x.fotosReporte||[]),...(x.fotosTecnico||[])];
-  return f.map(p=>`<img class="photo" src="${p}">`).join("");
-}
-
-function acciones(x){
-  let out=`<button class="btn-green" onclick='abrirWA(${JSON.stringify(x)})'>WhatsApp</button>`;
-
-  if((me.role==="gerente"||me.role==="admin")&&x.estado==="Reportado"){
-    out+=`
-      <br>
-      <select id="tec_${x.id}">
-        ${boot.tecnicos.map(t=>`<option value="${t.username}">${t.name}</option>`).join("")}
-      </select>
-      <button class="btn-blue" onclick="asignar('${x.id}')">Asignar y avisar</button>
-    `;
-  }
-
-  if((me.role==="tecnico"||me.role==="admin")&&x.estado==="Asignado"){
-    out+=`<br><button class="btn-blue" onclick="iniciar('${x.id}')">Iniciar atención</button>`;
-  }
-
-  if((me.role==="tecnico"||me.role==="admin")&&x.estado==="En atención"){
-    out+=`
-      <br>
-      <label>Diagnóstico</label>
-      <textarea id="diag_${x.id}"></textarea>
-
-      <label>Solución</label>
-      <textarea id="sol_${x.id}"></textarea>
-
-      <input id="ft_${x.id}" type="file" accept="image/*" multiple>
-
-      <button class="btn-green" onclick="terminar('${x.id}')">Terminar</button>
-    `;
-  }
-
-  if((me.role==="operaciones"||me.role==="admin")&&x.estado==="Pendiente validación"){
-    out+=`
-      <br>
-      <button class="btn-green" onclick="liberar('${x.id}')">Liberar equipo</button>
-      <button class="btn-red" onclick="devolver('${x.id}')">Devolver</button>
-    `;
-  }
-
-  return out;
-}
-
-async function asignar(id){
-  let tec=document.getElementById("tec_"+id).value;
-
-  let t=await api(`/api/tickets/${id}/asignar`,{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({tecnicoUsername:tec})
-  });
-
-  abrirWA(t);
-  render();
-}
-
-async function iniciar(id){
-  await api(`/api/tickets/${id}/iniciar`,{method:"POST"});
-  render();
-}
-
-async function terminar(id){
-  let fd=new FormData();
-
-  fd.append("diagnostico",document.getElementById("diag_"+id).value);
-  fd.append("solucion",document.getElementById("sol_"+id).value);
-
-  [...document.getElementById("ft_"+id).files].forEach(f=>fd.append("fotos",f));
-
-  await api(`/api/tickets/${id}/terminar`,{
-    method:"POST",
-    body:fd
-  });
-
-  render();
-}
-
-async function liberar(id){
-  await api(`/api/tickets/${id}/liberar`,{method:"POST"});
-  render();
-}
-
-async function devolver(id){
-  await api(`/api/tickets/${id}/devolver`,{method:"POST"});
-  render();
-}
-
-login();
+  </div>
+</section>`}
+async function doLogin(){try{const r=await api("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u.value,password:p.value})});me=r.user;guardarSesion();render()}catch(e){alert("No entró: "+e.message)}}
+async function cargarDatos(){equiposCache=await api("/api/equipos");ticketsCache=await api("/api/tickets")}
+async function render(){if(!me){login();return}nav();document.getElementById("userLabel").textContent=`${me.name||me.username} · ${me.role||""}`;const app=document.getElementById("app");app.style.maxWidth="1250px";app.style.padding="18px";await cargarDatos();app.innerHTML=`
+<section class="hero"><h2>Panel de mantenimiento industrial</h2><p>Equipos, herramientas, reportes y seguimiento de fallas en tiempo real.</p></section>
+<section class="cards-machines">
+  <div class="area-card"><div class="ico">🏭</div><b>Maquinaria</b><span>Control de equipos industriales</span></div>
+  <div class="area-card"><div class="ico">🛠️</div><b>Herramientas</b><span>Inventario y uso de herramientas</span></div>
+  <div class="area-card"><div class="ico">📋</div><b>Mantenimiento</b><span>Gestión de tickets y fallas</span></div>
+  <div class="area-card"><div class="ico">📊</div><b>Control</b><span>Seguimiento y reportes</span></div>
+</section>
+${dashboard()}${ticketCard()}${equiposCard()}${tablaTickets()}`}
+function dashboard(){const total=ticketsCache.length;const abiertos=ticketsCache.filter(t=>t.estado!=="Liberado").length;const equipos=equiposCache.length;const reportados=ticketsCache.filter(t=>t.estado==="Reportado").length;return `<div class="kpis"><div class="kpi"><b>${total}</b>Tickets totales</div><div class="kpi"><b>${abiertos}</b>Tickets abiertos</div><div class="kpi"><b>${equipos}</b>Equipos/herramientas</div><div class="kpi"><b>${reportados}</b>Reportados</div></div>`}
+function ticketCard(){return `<div class="card"><h2>Reportar falla</h2><div class="grid"><div><label>Equipo / herramienta</label><select id="equipo">${equiposCache.map(e=>`<option value="${e.numero}|${e.descripcion}|${e.area||""}">${e.numero} · ${e.descripcion}</option>`).join("")}</select></div><div><label>Reporta</label><input id="reporta" placeholder="Nombre de quien solicita"></div></div><label>Falla detectada</label><textarea id="falla" placeholder="Describe la falla..."></textarea><button class="btn-orange" onclick="crearTicket()">Crear ticket</button></div>`}
+async function crearTicket(){try{const sel=document.getElementById("equipo").value.split("|");await api("/api/tickets",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({equipo:sel[0],descripcion:sel[1],area:sel[2],reporta:document.getElementById("reporta").value,falla:document.getElementById("falla").value})});alert("Ticket creado");render()}catch(e){alert("Error al crear ticket: "+e.message)}}
+function equiposCard(){return `<div class="card"><h2>Agregar máquina / herramienta</h2><div class="grid"><input id="numeroEquipo" placeholder="Número de equipo"><input id="descripcionEquipo" placeholder="Descripción"><input id="areaEquipo" placeholder="Área"><select id="tipoEquipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select></div><button class="btn-orange" onclick="agregarEquipo()">Agregar equipo</button></div>`}
+async function agregarEquipo(){try{await api("/api/equipos",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({numero:document.getElementById("numeroEquipo").value,descripcion:document.getElementById("descripcionEquipo").value,area:document.getElementById("areaEquipo").value,tipo:document.getElementById("tipoEquipo").value})});alert("Equipo agregado");render()}catch(e){alert("Error al agregar equipo: "+e.message)}}
+function tablaTickets(){if(!ticketsCache.length)return `<div class="card"><h2>Tickets</h2><div class="empty">Sin tickets todavía.</div></div>`;return `<div class="card"><h2>Tickets registrados</h2><table><thead><tr><th>Ticket</th><th>Equipo</th><th>Área</th><th>Falla</th><th>Estado</th><th>Creado</th></tr></thead><tbody>${ticketsCache.map(t=>`<tr><td><b>${t.id}</b></td><td><b>${t.equipo||""}</b><br>${t.descripcion||""}</td><td>${t.area||""}</td><td>${t.falla||""}<br><span class="muted">Reporta: ${t.reporta||""}</span></td><td><span class="status ${statusClass(t.estado)}">${t.estado||"Reportado"}</span></td><td>${fmt(t.creado)}</td></tr>`).join("")}</tbody></table></div>`}
+cargarSesion();if(me)render();else login();
 </script>
-
 </body>
 </html>
