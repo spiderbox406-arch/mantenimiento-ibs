@@ -42,6 +42,32 @@ async function logAction(userId, action, details = {}){
   try { await pool.query('insert into user_activity_log(user_id, action, details) values($1,$2,$3)', [userId || null, action, JSON.stringify(details)]); } catch(e){ console.error('logAction', e.message); }
 }
 
+function minutesBetween(a, b){
+  if(!a || !b) return 0;
+  const start = new Date(a).getTime();
+  const end = new Date(b).getTime();
+  if(!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return Math.max(0, Math.round((end - start) / 60000));
+}
+function calcTicketTimes(t, nowDate = new Date()){
+  const creado = t.creado ? new Date(t.creado) : null;
+  const liberado = t.liberado ? new Date(t.liberado) : null;
+  const iniciado = t.iniciado ? new Date(t.iniciado) : null;
+  const terminado = t.terminado ? new Date(t.terminado) : null;
+  const totalEnd = liberado || nowDate;
+  const mttoEnd = terminado || (t.estado === 'En atención' ? nowDate : null);
+  const muertoTotalMin = creado ? minutesBetween(creado, totalEnd) : 0;
+  const mttoMin = iniciado && mttoEnd ? minutesBetween(iniciado, mttoEnd) : 0;
+  const esperaInicioMin = creado ? (iniciado ? minutesBetween(creado, iniciado) : minutesBetween(creado, nowDate)) : 0;
+  const esperaValidacionMin = terminado ? minutesBetween(terminado, liberado || nowDate) : 0;
+  const produccionMin = Math.max(0, muertoTotalMin - mttoMin);
+  return { mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin };
+}
+function decorateTicket(t){
+  const tiempos = calcTicketTimes(t);
+  return {...t, responsableActual:t.tecnico_username || '', tiempos};
+}
+
 async function initDb(){
   await pool.query(`
     create table if not exists users(
@@ -114,9 +140,16 @@ async function initDb(){
   `);
   const c = await pool.query('select count(*)::int as n from users');
   if(c.rows[0].n === 0){
-    const hash = await bcrypt.hash('admin1234', 12);
+    const hash = await bcrypt.hash('1234', 12);
     await pool.query(`insert into users(name, username, password_hash, role, status, must_change_password) values($1,$2,$3,$4,$5,$6)`, ['Administrador IBS','admin',hash,'admin','activo',true]);
-    console.log('Usuario inicial creado: admin / admin1234');
+    console.log('Usuario inicial creado: admin / 1234');
+  } else {
+    const admin = await pool.query("select id, must_change_password from users where lower(username)='admin' limit 1");
+    if(admin.rows[0]?.must_change_password){
+      const hash = await bcrypt.hash('1234', 12);
+      await pool.query("update users set password_hash=$1, status='activo', role='admin', updated_at=now() where id=$2", [hash, admin.rows[0].id]);
+      console.log('Admin inicial actualizado: admin / 1234');
+    }
   }
 }
 
@@ -284,7 +317,7 @@ app.get('/api/tickets', requireLogin, async (req,res)=>{
   const q=norm(req.query.q || ''); let params=[], where='';
   if(q){ params.push('%'+q+'%'); where=`where upper(coalesce(id::text,'')||' '||coalesce(activo,'')||' '||coalesce(activo_descripcion,'')||' '||coalesce(area,'')||' '||coalesce(estado,'')||' '||coalesce(falla,'')||' '||coalesce(solicitante,'')) like $1`; }
   const r=await pool.query(`select * from tickets ${where} order by creado desc limit 1000`, params);
-  res.json(r.rows.map(t=>({...t, responsableActual:t.tecnico_username || '', tiempos:{mttoMin:t.mtto_min||0, produccionMin:t.produccion_min||0, muertoTotalMin:(t.mtto_min||0)+(t.produccion_min||0)}})));
+  res.json(r.rows.map(decorateTicket));
 });
 app.post('/api/tickets', requireLogin, async (req,res)=>{
   const t=req.body; if(!clean(t.falla)) return res.status(400).json({error:'Describe la falla.'});
@@ -295,30 +328,66 @@ app.post('/api/tickets', requireLogin, async (req,res)=>{
 app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2",[clean(req.body.tecnico_username),req.params.id]); await logAction(req.session.user.id,'assign_ticket',{id:req.params.id}); res.json({ok:true}); });
 app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='En atención', iniciado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'start_ticket',{id:req.params.id}); res.json({ok:true}); });
 app.post('/api/tickets/:id/terminar', requireLogin, async (req,res)=>{
-  const r=await pool.query('select * from tickets where id=$1',[req.params.id]); const t=r.rows[0];
-  const start=t.iniciado ? new Date(t.iniciado) : new Date(t.creado); const min=Math.max(0, Math.round((Date.now()-start.getTime())/60000));
-  await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5",[clean(req.body.diagnostico),clean(req.body.solucion),min,min,req.params.id]);
-  await logAction(req.session.user.id,'finish_ticket',{id:req.params.id}); res.json({ok:true});
+  const r=await pool.query('select * from tickets where id=$1',[req.params.id]);
+  const t=r.rows[0];
+  if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
+  const now = new Date();
+  const iniciado = t.iniciado || now;
+  const mttoMin = minutesBetween(iniciado, now);
+  const produccionMin = Math.max(0, minutesBetween(t.creado, now) - mttoMin);
+  await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5",[clean(req.body.diagnostico),clean(req.body.solucion),mttoMin,produccionMin,req.params.id]);
+  await logAction(req.session.user.id,'finish_ticket',{id:req.params.id, mttoMin, produccionMin});
+  res.json({ok:true});
 });
-app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Liberado', liberado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'release_ticket',{id:req.params.id}); res.json({ok:true}); });
+app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
+  const r=await pool.query('select * from tickets where id=$1',[req.params.id]);
+  const t=r.rows[0];
+  if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
+  const now = new Date();
+  const tiempos = calcTicketTimes({...t, liberado: now, estado:'Liberado'}, now);
+  await pool.query("update tickets set estado='Liberado', liberado=now(), mtto_min=$1, produccion_min=$2 where id=$3",[tiempos.mttoMin, tiempos.produccionMin, req.params.id]);
+  await logAction(req.session.user.id,'release_ticket',{id:req.params.id, tiempos});
+  res.json({ok:true, tiempos});
+});
 app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]); await logAction(req.session.user.id,'return_ticket',{id:req.params.id}); res.json({ok:true}); });
 
 app.get('/api/reportes', requireLogin, async (req,res)=>{
-  const [tot,est,area,tipo,act,emp] = await Promise.all([
-    pool.query('select count(*)::int total, count(*) filter(where estado <> \'Liberado\')::int abiertos, coalesce(sum(mtto_min),0)::int mtto, coalesce(sum(produccion_min),0)::int prod from tickets'),
+  const [allTickets,est,area,tipo,act,emp] = await Promise.all([
+    pool.query('select * from tickets'),
     pool.query('select estado,count(*)::int n from tickets group by estado order by n desc'),
-    pool.query('select coalesce(area,\'Sin área\') area,count(*)::int n from tickets group by coalesce(area,\'Sin área\') order by n desc'),
-    pool.query('select coalesce(tipo_falla,\'Sin tipo\') tipo,count(*)::int n from tickets group by coalesce(tipo_falla,\'Sin tipo\') order by n desc'),
+    pool.query("select coalesce(area,'Sin área') area,count(*)::int n from tickets group by coalesce(area,'Sin área') order by n desc"),
+    pool.query("select coalesce(tipo_falla,'Sin tipo') tipo,count(*)::int n from tickets group by coalesce(tipo_falla,'Sin tipo') order by n desc"),
     pool.query('select count(*)::int n from activos'),
     pool.query('select count(*)::int n from users')
   ]);
+  let mttoMin=0, produccionMin=0, muertoTotalMin=0, esperaInicioMin=0, esperaValidacionMin=0;
+  for(const t of allTickets.rows){
+    const x = calcTicketTimes(t);
+    mttoMin += x.mttoMin;
+    produccionMin += x.produccionMin;
+    muertoTotalMin += x.muertoTotalMin;
+    esperaInicioMin += x.esperaInicioMin;
+    esperaValidacionMin += x.esperaValidacionMin;
+  }
+  const abiertos = allTickets.rows.filter(t=>t.estado !== 'Liberado').length;
   const obj = rows => Object.fromEntries(rows.map(x=>[x.estado||x.area||x.tipo,x.n]));
-  res.json({ totalTickets:tot.rows[0].total, abiertos:tot.rows[0].abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin:tot.rows[0].mtto, produccionMin:tot.rows[0].prod, porEstado:obj(est.rows), porArea:obj(area.rows), porTipoFalla:obj(tipo.rows) });
+  res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado:obj(est.rows), porArea:obj(area.rows), porTipoFalla:obj(tipo.rows) });
 });
 app.get('/api/export/excel', requireLogin, async (req,res)=>{
   const [tickets, activos, users] = await Promise.all([pool.query('select * from tickets order by creado desc'),pool.query('select * from activos order by numero'),pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')]);
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tickets.rows), 'Tickets');
+  const ticketRows = tickets.rows.map(t => {
+    const tiempos = calcTicketTimes(t);
+    return {
+      ...t,
+      tiempo_muerto_total_min: tiempos.muertoTotalMin,
+      tiempo_mtto_min: tiempos.mttoMin,
+      tiempo_produccion_min: tiempos.produccionMin,
+      espera_inicio_min: tiempos.esperaInicioMin,
+      espera_validacion_min: tiempos.esperaValidacionMin
+    };
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ticketRows), 'Tickets');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(activos.rows), 'Activos');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users.rows), 'Usuarios');
   const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
