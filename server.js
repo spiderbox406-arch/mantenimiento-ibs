@@ -204,16 +204,20 @@ async function initDb(){
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS liberado timestamptz;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS mtto_min int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS produccion_min int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS mtto_seg int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS produccion_seg int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS total_muerto_seg int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS total_muerto_min int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_reporte jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_trabajo jsonb NOT NULL DEFAULT '[]'::jsonb;
   `);
-
 
   await pool.query(`
     UPDATE tickets
     SET estado = 'Reportado'
     WHERE estado IS NULL OR trim(estado) = '';
   `);
+
 
   // Reparar ID de tickets en bases antiguas:
   // Si id es numérico, se agrega secuencia.
@@ -500,29 +504,130 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
     res.status(500).json({error:err.message});
   }
 });
-app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2",[clean(req.body.tecnico_username),req.params.id]); await logAction(req.session.user.id,'assign_ticket',{id:req.params.id}); res.json({ok:true}); });
-app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='En atención', iniciado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'start_ticket',{id:req.params.id}); res.json({ok:true}); });
+app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
+  try{
+    const r = await pool.query(
+      "update tickets set estado='Asignado', tecnico_username=$1, asignado=coalesce(asignado,now()) where id=$2 returning *",
+      [clean(req.body.tecnico_username),req.params.id]
+    );
+    if(!r.rows[0]) return res.status(404).json({error:'Ticket no encontrado.'});
+    await logAction(req.session.user.id,'assign_ticket',{id:req.params.id});
+    if(typeof notifyTicketAssigned === 'function') await notifyTicketAssigned(r.rows[0]);
+    res.json({ok:true, ticket:r.rows[0]});
+  }catch(err){
+    console.error('Error asignando ticket:', err);
+    res.status(500).json({error:err.message});
+  }
+});
+app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{
+  try{
+    const r = await pool.query(
+      "update tickets set estado='En atención', iniciado=coalesce(iniciado,now()) where id=$1 returning *",
+      [req.params.id]
+    );
+    if(!r.rows[0]) return res.status(404).json({error:'Ticket no encontrado.'});
+    await logAction(req.session.user.id,'start_ticket',{id:req.params.id});
+    res.json({ok:true, ticket:r.rows[0]});
+  }catch(err){
+    console.error('Error iniciando ticket:', err);
+    res.status(500).json({error:err.message});
+  }
+});
 app.post('/api/tickets/:id/terminar', requireLogin, uploadImages.array('fotos_trabajo', 6), async (req,res)=>{
-  const r=await pool.query('select * from tickets where id=$1',[req.params.id]);
-  const t=r.rows[0];
-  if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
-  const now = new Date();
-  const iniciado = t.iniciado || now;
-  const mttoMin = minutesBetween(iniciado, now);
-  const produccionMin = Math.max(0, minutesBetween(t.creado, now) - mttoMin);
-  await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5",[clean(req.body.diagnostico),clean(req.body.solucion),mttoMin,produccionMin,req.params.id]);
-  await logAction(req.session.user.id,'finish_ticket',{id:req.params.id, mttoMin, produccionMin});
-  res.json({ok:true});
+  try{
+    const q = await pool.query('select * from tickets where id=$1',[req.params.id]);
+    const t = q.rows[0];
+
+    if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
+    if(!t.iniciado) return res.status(400).json({error:'Primero debes iniciar la atención del ticket.'});
+
+    const fotosTrabajo = (req.files || []).map(f => '/uploads/' + f.filename);
+    const terminado = new Date();
+
+    const mttoSeg = secondsBetween(t.iniciado, terminado);
+    const mttoMin = Math.floor(mttoSeg / 60);
+
+    const up = await pool.query(`
+      UPDATE tickets
+      SET
+        estado='Pendiente validación',
+        terminado=$1,
+        diagnostico=$2,
+        solucion=$3,
+        mtto_seg=$4,
+        mtto_min=$5,
+        fotos_trabajo=coalesce(fotos_trabajo,'[]'::jsonb) || $6::jsonb
+      WHERE id=$7
+      RETURNING *
+    `, [
+      terminado,
+      clean(req.body.diagnostico),
+      clean(req.body.solucion),
+      mttoSeg,
+      mttoMin,
+      JSON.stringify(fotosTrabajo),
+      req.params.id
+    ]);
+
+    await logAction(req.session.user.id,'finish_ticket',{id:req.params.id, mttoSeg, mttoMin});
+    if(up.rows[0] && typeof notifyTicketFinished === 'function') await notifyTicketFinished(up.rows[0]);
+
+    res.json({ok:true, ticket:up.rows[0]});
+  }catch(err){
+    console.error('Error terminando ticket:', err);
+    res.status(500).json({error:err.message});
+  }
 });
 app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
-  const r=await pool.query('select * from tickets where id=$1',[req.params.id]);
-  const t=r.rows[0];
-  if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
-  const now = new Date();
-  const tiempos = calcTicketTimes({...t, liberado: now, estado:'Liberado'}, now);
-  await pool.query("update tickets set estado='Liberado', liberado=now(), mtto_min=$1, produccion_min=$2 where id=$3",[tiempos.mttoMin, tiempos.produccionMin, req.params.id]);
-  await logAction(req.session.user.id,'release_ticket',{id:req.params.id, tiempos});
-  res.json({ok:true, tiempos});
+  try{
+    const q = await pool.query('select * from tickets where id=$1',[req.params.id]);
+    const t = q.rows[0];
+
+    if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
+    if(!t.terminado) return res.status(400).json({error:'Primero debes terminar la reparación.'});
+
+    const liberado = new Date();
+
+    const mttoSeg = Number(t.mtto_seg || secondsBetween(t.iniciado, t.terminado));
+    const prodSeg = secondsBetween(t.terminado, liberado);
+    const totalSeg = secondsBetween(t.creado, liberado);
+
+    const mttoMin = Math.floor(mttoSeg / 60);
+    const prodMin = Math.floor(prodSeg / 60);
+    const totalMin = Math.floor(totalSeg / 60);
+
+    const up = await pool.query(`
+      UPDATE tickets
+      SET
+        estado='Liberado',
+        liberado=$1,
+        mtto_seg=$2,
+        mtto_min=$3,
+        produccion_seg=$4,
+        produccion_min=$5,
+        total_muerto_seg=$6,
+        total_muerto_min=$7
+      WHERE id=$8
+      RETURNING *
+    `, [
+      liberado,
+      mttoSeg,
+      mttoMin,
+      prodSeg,
+      prodMin,
+      totalSeg,
+      totalMin,
+      req.params.id
+    ]);
+
+    await logAction(req.session.user.id,'release_ticket',{id:req.params.id, mttoSeg, prodSeg, totalSeg});
+    if(up.rows[0] && typeof notifyTicketReleased === 'function') await notifyTicketReleased(up.rows[0]);
+
+    res.json({ok:true, ticket:up.rows[0]});
+  }catch(err){
+    console.error('Error liberando ticket:', err);
+    res.status(500).json({error:err.message});
+  }
 });
 app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]); await logAction(req.session.user.id,'return_ticket',{id:req.params.id}); res.json({ok:true}); });
 
