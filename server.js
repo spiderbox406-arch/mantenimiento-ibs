@@ -208,6 +208,29 @@ async function initDb(){
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_trabajo jsonb NOT NULL DEFAULT '[]'::jsonb;
   `);
 
+
+  // Reparar ID de tickets en bases antiguas:
+  // Si id es numérico, se agrega secuencia.
+  // Si id es texto, se agrega default tipo MTTO-xxxx.
+  await pool.query(`
+    DO $$
+    DECLARE
+      id_type text;
+    BEGIN
+      SELECT data_type INTO id_type
+      FROM information_schema.columns
+      WHERE table_name='tickets' AND column_name='id';
+
+      IF id_type IN ('integer','bigint','smallint') THEN
+        CREATE SEQUENCE IF NOT EXISTS tickets_id_seq;
+        EXECUTE 'ALTER TABLE tickets ALTER COLUMN id SET DEFAULT nextval(''tickets_id_seq'')';
+        PERFORM setval('tickets_id_seq', COALESCE((SELECT MAX(id::bigint) FROM tickets),0) + 1, false);
+      ELSIF id_type IN ('text','character varying','character') THEN
+        EXECUTE 'ALTER TABLE tickets ALTER COLUMN id SET DEFAULT (''MTTO-'' || floor(extract(epoch from clock_timestamp()) * 1000)::text)';
+      END IF;
+    END $$;
+  `);
+
   const c = await pool.query('select count(*)::int as n from users');
   if(c.rows[0].n === 0){
     const hash = await bcrypt.hash('1234', 12);
