@@ -55,6 +55,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 function clean(v){ return String(v ?? '').trim(); }
 function norm(v){ return clean(v).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+const DEMO_USERNAMES = ['demo','test','usuario','prueba','operador','operaciones_demo','demo_area','area_demo','user_demo'];
 const MATRIZ_SUCURSAL = 'CHIHUAHUA';
 function sameKey(a,b){ return norm(a) === norm(b); }
 function isGlobalRole(role){ return ['admin','gerente','mantenimiento'].includes(String(role||'').toLowerCase()); }
@@ -409,8 +410,9 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
 
 app.get('/api/users', requireAdmin, async (req,res)=>{
   const q = norm(req.query.q || '');
-  let params=[], where='';
-  if(q){ params.push('%'+q+'%'); where = `where upper(coalesce(numero_empleado,'')||' '||coalesce(name,'')||' '||coalesce(username,'')||' '||coalesce(role,'')||' '||coalesce(area_asignada,'')||' '||coalesce(sucursal,'')||' '||coalesce(status,'')) like $1`; }
+  const params=[DEMO_USERNAMES];
+  let where = "where not (lower(username)=any($1::text[]) or lower(coalesce(name,'')) like '%demo%')";
+  if(q){ params.push('%'+q+'%'); where += ` and upper(coalesce(numero_empleado,'')||' '||coalesce(name,'')||' '||coalesce(username,'')||' '||coalesce(role,'')||' '||coalesce(area_asignada,'')||' '||coalesce(sucursal,'')||' '||coalesce(status,'')) like $2`; }
   const r = await pool.query(`select id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo, created_at, updated_at from users ${where} order by name`, params);
   res.json(r.rows);
 });
@@ -419,10 +421,18 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
   if(!clean(u.username) || !clean(u.name)) return res.status(400).json({error:'Usuario y nombre son obligatorios.'});
   const hash=await bcrypt.hash(pass,12);
   const r=await pool.query(`insert into users(numero_empleado,name,username,password_hash,role,status,must_change_password,area_asignada,sucursal,telefono,correo)
-    values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9) returning id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo`,
+    values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9) returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo`,
     [clean(u.numero_empleado),clean(u.name),clean(u.username),hash,clean(u.role||'operaciones'),clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo)]);
   await logAction(req.session.user.id, 'create_user', {username:u.username});
   res.json(r.rows[0]);
+});
+app.post('/api/users/cleanup-demos', requireAdmin, async (req,res)=>{
+  const r = await pool.query(
+    "delete from users where lower(username)=any($1::text[]) and lower(username) <> 'admin' returning id, username",
+    [DEMO_USERNAMES]
+  );
+  await logAction(req.session.user.id, 'cleanup_demo_users', {deleted:r.rowCount, users:r.rows.map(x=>x.username)});
+  res.json({ok:true, deleted:r.rowCount, users:r.rows});
 });
 app.put('/api/users/:id', requireAdmin, async (req,res)=>{
   const u=req.body;
