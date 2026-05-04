@@ -35,6 +35,51 @@ async function withLoading(msg, fn){showLoading(msg);try{return await fn()}final
 function byId(id){return document.getElementById(id)}
 function val(id){const el=byId(id);return el?el.value:''}
 function filesOf(id){const el=byId(id);return el&&el.files?[...el.files]:[]}
+
+function soloDigitos(v){
+  return String(v||'').replace(/\D/g,'');
+}
+function telefonoWhats(v){
+  let d=soloDigitos(v);
+  if(!d) return '';
+  if(d.length===10) d='52'+d;
+  if(d.length===12 && d.startsWith('52')) return d;
+  if(d.length>=11) return d;
+  return d;
+}
+function mensajeTicket(t, titulo='Ticket de mantenimiento IBS'){
+  return `${titulo}
+
+Ticket: ${t.id || ''}
+Activo: ${t.activo || ''} - ${t.activo_descripcion || ''}
+Área: ${t.area || ''}
+Ubicación: ${t.ubicacion || ''}
+Prioridad: ${t.prioridad || ''}
+Tipo falla: ${t.tipo_falla || ''}
+Estado: ${t.estado || ''}
+
+Falla:
+${t.falla || ''}
+
+Solicita: ${t.solicitante || ''}
+Tel/ext: ${t.telefono_solicitante || ''}
+
+Sistema:
+${location.origin}`;
+}
+function abrirWhatsApp(numero, mensaje){
+  const tel=telefonoWhats(numero);
+  const url = tel
+    ? `https://wa.me/${tel}?text=${encodeURIComponent(mensaje)}`
+    : `https://web.whatsapp.com/send?text=${encodeURIComponent(mensaje)}`;
+  window.open(url,'_blank');
+}
+function btnWhatsTicket(t, titulo='Enviar WhatsApp'){
+  const msg = mensajeTicket(t, titulo);
+  const tel = t.telefono_solicitante || '';
+  return `<button class="btn-green" type="button" onclick='abrirWhatsApp(${JSON.stringify(tel)}, ${JSON.stringify(msg)})'>WhatsApp</button>`;
+}
+
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]))}
 function fmt(d){return d?new Date(d).toLocaleString():'-'}
 function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replaceAll(' ','')}
@@ -180,7 +225,7 @@ function fotosHtml(arr){
   if(!fotos.length) return '';
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${fotos.map(p=>`<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" style="width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid #ddd"></a>`).join('')}</div>`;
 }
-function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio MTTO: ${fmt(t.iniciado)}</span><br><span class="muted">Fin MTTO: ${fmt(t.terminado)}</span><br><span class="muted">Liberado: ${fmt(t.liberado)}</span></td><td><b>Total muerto:</b> ${t.tiempos.muertoTotalMin} min<br><b>MTTO real:</b> ${t.tiempos.mttoMin} min<br><b>Producción/espera:</b> ${t.tiempos.produccionMin} min<hr style="border:0;border-top:1px solid #e5e7eb"><span class="muted">Espera antes de iniciar: ${t.tiempos.esperaInicioMin||0} min</span><br><span class="muted">Espera validación/liberación: ${t.tiempos.esperaValidacionMin||0} min</span></td><td>${acciones(t)}</td></tr>`).join('')}</tbody></table>`}
+function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio MTTO: ${fmt(t.iniciado)}</span><br><span class="muted">Fin MTTO: ${fmt(t.terminado)}</span><br><span class="muted">Liberado: ${fmt(t.liberado)}</span></td><td><b>Total muerto:</b> ${t.tiempos.muertoTotalMin} min<br><b>MTTO real:</b> ${t.tiempos.mttoMin} min<br><b>Producción/espera:</b> ${t.tiempos.produccionMin} min<hr style="border:0;border-top:1px solid #e5e7eb"><span class="muted">Espera antes de iniciar: ${t.tiempos.esperaInicioMin||0} min</span><br><span class="muted">Espera validación/liberación: ${t.tiempos.esperaValidacionMin||0} min</span></td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}</td></tr>`).join('')}</tbody></table>`}
 function activosView(){return `<div class="card"><h2>Importar activos desde Excel</h2><p class="muted">Acepta tu formato actual: NUM ACTIVO, DESCRIPCION, AREA, TIPO, SUCURSAL, UBICACION, MARCA, MODELO, USUARIO, ESTATUS.</p>${isAdmin()?`<input type="file" id="excelActivos" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/activos','excelActivos')">Importar activos</button>`:'<p class="muted">Solo admin puede importar.</p>'}</div>${isAdmin()?`<div class="card"><h2>Agregar activo manual</h2><div class="grid4"><input id="aNum" placeholder="Número"><input id="aDesc" placeholder="Descripción"><input id="aArea" placeholder="Área"><select id="aTipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select><input id="aSuc" placeholder="Sucursal"><input id="aUbi" placeholder="Ubicación"><input id="aMarca" placeholder="Marca"><input id="aModelo" placeholder="Modelo"><input id="aUsuario" placeholder="Usuario responsable"><input id="aEstatus" placeholder="Estatus" value="VIGENTE"></div><button class="btn-orange" onclick="agregarActivo()">Guardar activo</button></div>`:''}<div class="card"><h2>Activos</h2><div class="searchbox"><input id="qActivos" oninput="filterActivos(this.value)" placeholder="Buscar por palabra clave: activo, descripción, área, tipo, sucursal, ubicación, marca, usuario, estatus"></div><div id="activosTable">${tablaActivos(activos)}</div></div>`}
 async function importar(endpoint,inputId){showLoading('Importando Excel...');try{let file=document.getElementById(inputId).files[0];if(!file)return alert('Selecciona un Excel');let fd=new FormData();fd.append('archivo',file);let r=await api(endpoint,{method:'POST',body:fd});alert(`Importado\nAgregados: ${r.agregados}\nActualizados: ${r.actualizados}\nOmitidos: ${r.omitidos}`);render()}catch(e){alert('Error: '+e.message)}finally{hideLoading()}}
 async function agregarActivo(){if(!isAdmin()) return alert('Solo administrador puede agregar activos');await api('/api/activos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numero:aNum.value,descripcion:aDesc.value,area:aArea.value,tipo:aTipo.value,sucursal:aSuc.value,ubicacion:aUbi.value,marca:aMarca.value,modelo:aModelo.value,usuario:aUsuario.value,estatus:aEstatus.value})});render()}
