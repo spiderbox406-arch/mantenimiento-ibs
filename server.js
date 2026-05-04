@@ -6,7 +6,6 @@ const helmet = require('helmet');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
 const path = require('path');
 const fs = require('fs');
@@ -49,12 +48,29 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'dev_secret_cambiar',
   resave: false,
   saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 8 }
+  rolling: true,
+  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 2 }
 }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function clean(v){ return String(v ?? '').trim(); }
 function norm(v){ return clean(v).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+const MATRIZ_SUCURSAL = 'CHIHUAHUA';
+function sameKey(a,b){ return norm(a) === norm(b); }
+function isGlobalRole(role){ return ['admin','gerente','mantenimiento'].includes(String(role||'').toLowerCase()); }
+function isGlobalUser(user){ return Boolean(user && isGlobalRole(user.role)); }
+function isTecnicoRole(role){ return ['tecnico','mantenimiento','admin'].includes(String(role||'').toLowerCase()); }
+function addScopedClauses(user, params, clauses, alias=''){
+  const p = alias ? alias + '.' : '';
+  if(!user || isGlobalUser(user)) return;
+  if(clean(user.sucursal)){ params.push(norm(user.sucursal)); clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`); }
+  if(clean(user.area_asignada)){ params.push(norm(user.area_asignada)); clauses.push(`upper(coalesce(${p}area,'')) = $${params.length}`); }
+}
+function buildWhere(clauses){ return clauses.length ? ' where ' + clauses.join(' and ') : ''; }
+async function getUserByUsername(username){
+  const r = await pool.query('select id, name, username, role, status, sucursal, area_asignada, telefono, correo from users where lower(username)=lower($1) limit 1', [clean(username)]);
+  return r.rows[0] || null;
+}
 function requireLogin(req,res,next){ if(!req.session.user) return res.status(401).json({error:'Sesión vencida. Inicia sesión otra vez.'}); next(); }
 function requireAdmin(req,res,next){ if(!req.session.user || req.session.user.role !== 'admin') return res.status(403).json({error:'Solo administrador.'}); next(); }
 function canExportExcel(req){
@@ -100,97 +116,6 @@ function calcTicketTimes(t, nowDate = new Date()){
 function decorateTicket(t){
   const tiempos = calcTicketTimes(t);
   return {...t, responsableActual:t.tecnico_username || '', tiempos};
-}
-
-function emailEnabled(){
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-}
-function mailList(value){
-  return String(value || '').split(',').map(x => x.trim()).filter(Boolean).join(',');
-}
-function makeTransporter(){
-  if(!emailEnabled()) return null;
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-  });
-}
-async function sendMailSafe({to, cc, subject, text}){
-  const finalTo = mailList(to);
-  if(!finalTo || !emailEnabled()) return false;
-  try{
-    const transporter = makeTransporter();
-    await transporter.sendMail({
-      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
-      to: finalTo,
-      cc: mailList(cc) || undefined,
-      subject,
-      text
-    });
-    return true;
-  }catch(e){
-    console.error('No se pudo enviar correo:', e.message);
-    return false;
-  }
-}
-function ticketText(t, titulo){
-  const x = calcTicketTimes(t);
-  return `${titulo}\n\nTicket: ${t.id || ''}\nActivo: ${t.activo || ''} - ${t.activo_descripcion || ''}\nÁrea: ${t.area || ''}\nUbicación: ${t.ubicacion || ''}\nPrioridad: ${t.prioridad || ''}\nTipo de falla: ${t.tipo_falla || ''}\nEstado: ${t.estado || ''}\nTécnico: ${t.tecnico_username || ''}\n\nFalla:\n${t.falla || ''}\n\nDiagnóstico:\n${t.diagnostico || ''}\n\nSolución:\n${t.solucion || ''}\n\nSolicita: ${t.solicitante || ''}\nTel/ext: ${t.telefono_solicitante || ''}\n\nTiempos:\nTotal muerto: ${x.muertoTotalMin} min\nMTTO real: ${x.mttoMin} min\nProducción/espera: ${x.produccionMin} min\n\nSistema: ${process.env.APP_URL || ''}`;
-}
-async function getTechEmail(username){
-  if(!username) return '';
-  const r = await pool.query('select correo from users where lower(username)=lower($1) limit 1', [username]);
-  return r.rows[0]?.correo || '';
-}
-async function notifyTicketCreated(t){
-  await sendMailSafe({
-    to: process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
-    subject: `Nuevo ticket IBS ${t.id} · ${t.activo || ''}`,
-    text: ticketText(t, 'Nuevo ticket de mantenimiento IBS')
-  });
-}
-async function notifyTicketAssigned(t){
-  const techEmail = await getTechEmail(t.tecnico_username);
-  await sendMailSafe({
-    to: techEmail || process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
-    cc: process.env.EMAIL_MTTO_TO,
-    subject: `Ticket asignado IBS ${t.id} · ${t.activo || ''}`,
-    text: ticketText(t, 'Ticket asignado')
-  });
-}
-async function notifyTicketFinished(t){
-  await sendMailSafe({
-    to: process.env.EMAIL_PRODUCCION_TO || process.env.EMAIL_ALERTS_TO,
-    cc: process.env.EMAIL_MTTO_TO,
-    subject: `Ticket pendiente de validación ${t.id} · ${t.activo || ''}`,
-    text: ticketText(t, 'Reparación terminada. Pendiente validación/liberación')
-  });
-}
-async function notifyTicketReleased(t){
-  await sendMailSafe({
-    to: process.env.EMAIL_ALERTS_TO || process.env.EMAIL_MTTO_TO,
-    cc: process.env.EMAIL_PRODUCCION_TO,
-    subject: `Ticket liberado IBS ${t.id} · ${t.activo || ''}`,
-    text: ticketText(t, 'Equipo liberado')
-  });
-}
-function addGroup(map, key, t){
-  const k = clean(key) || 'Sin dato';
-  if(!map[k]) map[k] = { cantidad:0, muertoTotalMin:0, mttoMin:0, produccionMin:0, esperaInicioMin:0, esperaValidacionMin:0 };
-  const x = calcTicketTimes(t);
-  map[k].cantidad++;
-  map[k].muertoTotalMin += x.muertoTotalMin;
-  map[k].mttoMin += x.mttoMin;
-  map[k].produccionMin += x.produccionMin;
-  map[k].esperaInicioMin += x.esperaInicioMin;
-  map[k].esperaValidacionMin += x.esperaValidacionMin;
-}
-function rankFromMap(map, limit=10){
-  return Object.entries(map).map(([nombre, v]) => ({nombre, ...v}))
-    .sort((a,b) => (b.muertoTotalMin - a.muertoTotalMin) || (b.cantidad - a.cantidad))
-    .slice(0, limit);
 }
 
 async function initDb(){
@@ -409,14 +334,19 @@ app.post('/api/change-password', requireLogin, async (req,res)=>{
 });
 
 app.get('/api/bootstrap', requireLogin, async (req,res)=>{
+  const user = req.session.user;
+  const assetParams=[]; const assetClauses=[];
+  addScopedClauses(user, assetParams, assetClauses);
+  const assetsWhere = buildWhere(assetClauses);
+
   const [a,t] = await Promise.all([
-    pool.query('select * from activos order by numero limit 5000'),
-    pool.query("select id, name, username, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by name")
+    pool.query(`select * from activos ${assetsWhere} order by sucursal, area, numero limit 5000`, assetParams),
+    pool.query("select id, name, username, role, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by sucursal, name")
   ]);
 
   let empleados = [];
-  if(req.session.user.role === 'admin'){
-    const e = await pool.query('select id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo, created_at, updated_at from users order by name limit 2000');
+  if(user.role === 'admin'){
+    const e = await pool.query('select id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo, created_at, updated_at from users order by sucursal, area_asignada, name limit 2000');
     empleados = e.rows;
   }
 
@@ -426,9 +356,11 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
 app.get('/api/activos', requireLogin, async (req,res)=>{
   const q = norm(req.query.q || '');
   const params = [];
-  let where = '';
-  if(q){ params.push('%' + q + '%'); where = 'where search_text like $1'; }
-  const r = await pool.query(`select * from activos ${where} order by numero limit 1000`, params);
+  const clauses = [];
+  addScopedClauses(req.session.user, params, clauses);
+  if(q){ params.push('%' + q + '%'); clauses.push(`search_text like $${params.length}`); }
+  const where = buildWhere(clauses);
+  const r = await pool.query(`select * from activos ${where} order by sucursal, area, numero limit 1000`, params);
   res.json(r.rows);
 });
 app.post('/api/activos', requireAdmin, async (req,res)=>{
@@ -438,7 +370,7 @@ app.post('/api/activos', requireAdmin, async (req,res)=>{
   const r = await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     on conflict(numero) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()
-    returning *`, [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
+    returning *`, [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal || 'SIN SUCURSAL'),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
   await logAction(req.session.user.id, 'upsert_asset', {numero:a.numero});
   res.json(r.rows[0]);
 });
@@ -468,7 +400,7 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
     await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
       on conflict(numero) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()`,
-      [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus),search]);
+      [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal || 'SIN SUCURSAL'),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus),search]);
     exists.rows.length ? actualizados++ : agregados++;
   }
   await logAction(req.session.user.id, 'import_assets', {agregados,actualizados,omitidos});
@@ -537,8 +469,14 @@ app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async 
 });
 
 app.get('/api/tickets', requireLogin, async (req,res)=>{
-  const q=norm(req.query.q || ''); let params=[], where='';
-  if(q){ params.push('%'+q+'%'); where=`where upper(coalesce(id::text,'')||' '||coalesce(activo,'')||' '||coalesce(activo_descripcion,'')||' '||coalesce(area,'')||' '||coalesce(estado,'')||' '||coalesce(falla,'')||' '||coalesce(solicitante,'')) like $1`; }
+  const q=norm(req.query.q || '');
+  const params=[]; const clauses=[];
+  addScopedClauses(req.session.user, params, clauses);
+  if(q){
+    params.push('%'+q+'%');
+    clauses.push(`upper(coalesce(id::text,'')||' '||coalesce(activo,'')||' '||coalesce(activo_descripcion,'')||' '||coalesce(area,'')||' '||coalesce(sucursal,'')||' '||coalesce(estado,'')||' '||coalesce(falla,'')||' '||coalesce(solicitante,'')) like $${params.length}`);
+  }
+  const where = buildWhere(clauses);
   const r=await pool.query(`select * from tickets ${where} order by creado desc limit 1000`, params);
   res.json(r.rows.map(decorateTicket));
 });
@@ -551,6 +489,8 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
     }
 
     const fotosReporte = (req.files || []).map(f => '/uploads/' + f.filename);
+    const ticketSucursal = isGlobalUser(req.session.user) ? clean(t.sucursal || 'SIN SUCURSAL') : clean(req.session.user.sucursal || t.sucursal || 'SIN SUCURSAL');
+    const ticketArea = isGlobalUser(req.session.user) ? clean(t.area || req.session.user.area_asignada || '') : clean(req.session.user.area_asignada || t.area || '');
 
     const r = await pool.query(`
       INSERT INTO tickets(
@@ -574,8 +514,8 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
     `, [
       clean(t.activo),
       clean(t.activo_descripcion),
-      clean(t.area),
-      clean(t.sucursal),
+      ticketArea,
+      ticketSucursal,
       clean(t.ubicacion),
       clean(t.solicitante),
       clean(t.empleado_solicitante),
@@ -592,10 +532,6 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
       activo:t.activo
     });
 
-    if(typeof notifyTicketCreated === 'function'){
-      await notifyTicketCreated(r.rows[0]);
-    }
-
     res.json(r.rows[0]);
   }catch(err){
     console.error('Error creando ticket:', err);
@@ -604,14 +540,26 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
 });
 app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
   try{
+    if(!isGlobalUser(req.session.user)) return res.status(403).json({error:'Solo gerente, mantenimiento o admin puede asignar tickets.'});
+    const tecnico = await getUserByUsername(req.body.tecnico_username);
+    if(!tecnico || tecnico.status !== 'activo' || !isTecnicoRole(tecnico.role)) return res.status(400).json({error:'Técnico no válido o inactivo.'});
+
+    const qTicket = await pool.query('select * from tickets where id=$1', [req.params.id]);
+    const ticket = qTicket.rows[0];
+    if(!ticket) return res.status(404).json({error:'Ticket no encontrado.'});
+
+    const ticketSuc = norm(ticket.sucursal);
+    const tecnicoSuc = norm(tecnico.sucursal);
+    if(ticketSuc && tecnicoSuc && ticketSuc !== tecnicoSuc && tecnicoSuc !== norm(MATRIZ_SUCURSAL)){
+      return res.status(400).json({error:'Ese técnico no pertenece a la sucursal del ticket ni a matriz Chihuahua.'});
+    }
+
     const r = await pool.query(
       "update tickets set estado='Asignado', tecnico_username=$1, asignado=coalesce(asignado,now()) where id=$2 returning *",
       [clean(req.body.tecnico_username),req.params.id]
     );
-    if(!r.rows[0]) return res.status(404).json({error:'Ticket no encontrado.'});
-    await logAction(req.session.user.id,'assign_ticket',{id:req.params.id});
-    if(typeof notifyTicketAssigned === 'function') await notifyTicketAssigned(r.rows[0]);
-    res.json({ok:true, ticket:r.rows[0]});
+    await logAction(req.session.user.id,'assign_ticket',{id:req.params.id, tecnico:req.body.tecnico_username});
+    res.json({ok:true, ticket:decorateTicket(r.rows[0])});
   }catch(err){
     console.error('Error asignando ticket:', err);
     res.status(500).json({error:err.message});
@@ -730,60 +678,33 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
 app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]); await logAction(req.session.user.id,'return_ticket',{id:req.params.id}); res.json({ok:true}); });
 
 app.get('/api/reportes', requireLogin, async (req,res)=>{
-  const [allTickets,est,area,tipo,act,emp] = await Promise.all([
-    pool.query('select * from tickets'),
-    pool.query('select estado,count(*)::int n from tickets group by estado order by n desc'),
-    pool.query("select coalesce(area,'Sin área') area,count(*)::int n from tickets group by coalesce(area,'Sin área') order by n desc"),
-    pool.query("select coalesce(tipo_falla,'Sin tipo') tipo,count(*)::int n from tickets group by coalesce(tipo_falla,'Sin tipo') order by n desc"),
-    pool.query('select count(*)::int n from activos'),
+  const params=[]; const clauses=[];
+  addScopedClauses(req.session.user, params, clauses);
+  const where = buildWhere(clauses);
+  const [allTickets,act,emp] = await Promise.all([
+    pool.query(`select * from tickets ${where}`, params),
+    pool.query(isGlobalUser(req.session.user) ? 'select count(*)::int n from activos' : `select count(*)::int n from activos ${where}`, params),
     pool.query('select count(*)::int n from users')
   ]);
   let mttoMin=0, produccionMin=0, muertoTotalMin=0, esperaInicioMin=0, esperaValidacionMin=0;
-  const porActivoMap = {}, porAreaMap = {}, porTecnicoMap = {}, porFallaMap = {}, porPrioridadMap = {}, porSucursalMap = {};
+  const porEstado={}, porArea={}, porTipoFalla={}, porSucursal={}, porActivo={}, porTecnico={};
   for(const t of allTickets.rows){
     const x = calcTicketTimes(t);
-    mttoMin += x.mttoMin;
-    produccionMin += x.produccionMin;
-    muertoTotalMin += x.muertoTotalMin;
-    esperaInicioMin += x.esperaInicioMin;
-    esperaValidacionMin += x.esperaValidacionMin;
-    addGroup(porActivoMap, `${t.activo || 'Sin activo'} · ${t.activo_descripcion || ''}`.trim(), t);
-    addGroup(porAreaMap, t.area, t);
-    addGroup(porTecnicoMap, t.tecnico_username || 'Sin técnico', t);
-    addGroup(porFallaMap, t.tipo_falla || 'Sin tipo', t);
-    addGroup(porPrioridadMap, t.prioridad || 'Normal', t);
-    addGroup(porSucursalMap, t.sucursal || 'Sin sucursal', t);
+    mttoMin += x.mttoMin; produccionMin += x.produccionMin; muertoTotalMin += x.muertoTotalMin;
+    esperaInicioMin += x.esperaInicioMin; esperaValidacionMin += x.esperaValidacionMin;
+    porEstado[t.estado || 'Sin estado'] = (porEstado[t.estado || 'Sin estado']||0)+1;
+    porArea[t.area || 'Sin área'] = (porArea[t.area || 'Sin área']||0)+1;
+    porTipoFalla[t.tipo_falla || 'Sin tipo'] = (porTipoFalla[t.tipo_falla || 'Sin tipo']||0)+1;
+    porSucursal[t.sucursal || 'Sin sucursal'] = (porSucursal[t.sucursal || 'Sin sucursal']||0)+1;
+    porActivo[(t.activo || 'Sin activo') + ' · ' + (t.activo_descripcion || '')] = (porActivo[(t.activo || 'Sin activo') + ' · ' + (t.activo_descripcion || '')]||0)+1;
+    porTecnico[t.tecnico_username || 'Sin asignar'] = (porTecnico[t.tecnico_username || 'Sin asignar']||0)+1;
   }
   const abiertos = allTickets.rows.filter(t=>t.estado !== 'Liberado').length;
-  const obj = rows => Object.fromEntries(rows.map(x=>[x.estado||x.area||x.tipo,x.n]));
-  const eficienciaTecnicos = rankFromMap(porTecnicoMap, 20).map(x => ({
-    ...x,
-    promedioMttoMin: x.cantidad ? Math.round(x.mttoMin / x.cantidad) : 0,
-    promedioMuertoMin: x.cantidad ? Math.round(x.muertoTotalMin / x.cantidad) : 0
-  }));
-  res.json({
-    totalTickets:allTickets.rows.length,
-    abiertos,
-    totalActivos:act.rows[0].n,
-    totalEmpleados:emp.rows[0].n,
-    mttoMin,
-    produccionMin,
-    muertoTotalMin,
-    esperaInicioMin,
-    esperaValidacionMin,
-    porEstado:obj(est.rows),
-    porArea:obj(area.rows),
-    porTipoFalla:obj(tipo.rows),
-    topActivos:rankFromMap(porActivoMap, 10),
-    topAreasTiempo:rankFromMap(porAreaMap, 10),
-    topTecnicos:eficienciaTecnicos,
-    topFallas:rankFromMap(porFallaMap, 10),
-    topPrioridades:rankFromMap(porPrioridadMap, 10),
-    topSucursales:rankFromMap(porSucursalMap, 10)
-  });
+  res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado, porArea, porTipoFalla, porSucursal, porActivo, porTecnico });
 });
 app.get('/api/export/excel', requireCanExport, async (req,res)=>{
-  const [tickets, activos, users] = await Promise.all([pool.query('select * from tickets order by creado desc'),pool.query('select * from activos order by numero'),pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')]);
+  const params=[]; const clauses=[]; addScopedClauses(req.session.user, params, clauses); const where = buildWhere(clauses);
+  const [tickets, activos, users] = await Promise.all([pool.query(`select * from tickets ${where} order by creado desc`, params),pool.query(isGlobalUser(req.session.user) ? 'select * from activos order by numero' : `select * from activos ${where} order by numero`, params),pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')]);
   const wb=XLSX.utils.book_new();
   const ticketRows = tickets.rows.map(t => {
     const tiempos = calcTicketTimes(t);
@@ -797,19 +718,6 @@ app.get('/api/export/excel', requireCanExport, async (req,res)=>{
     };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ticketRows), 'Tickets');
-  const mapas = { porActivo:{}, porArea:{}, porTecnico:{}, porFalla:{}, porSucursal:{} };
-  for(const t of tickets.rows){
-    addGroup(mapas.porActivo, `${t.activo || 'Sin activo'} · ${t.activo_descripcion || ''}`.trim(), t);
-    addGroup(mapas.porArea, t.area, t);
-    addGroup(mapas.porTecnico, t.tecnico_username || 'Sin técnico', t);
-    addGroup(mapas.porFalla, t.tipo_falla || 'Sin tipo', t);
-    addGroup(mapas.porSucursal, t.sucursal || 'Sin sucursal', t);
-  }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porActivo, 500)), 'Ranking Activos');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porArea, 200)), 'Ranking Areas');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porTecnico, 200)), 'Ranking Tecnicos');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porFalla, 200)), 'Ranking Fallas');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porSucursal, 200)), 'Ranking Sucursales');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(activos.rows), 'Activos');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users.rows), 'Usuarios');
   const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
