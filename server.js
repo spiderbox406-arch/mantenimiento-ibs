@@ -76,6 +76,13 @@ function minutesBetween(a, b){
   if(!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
   return Math.max(0, Math.round((end - start) / 60000));
 }
+function secondsBetween(a, b){
+  if(!a || !b) return 0;
+  const start = new Date(a).getTime();
+  const end = new Date(b).getTime();
+  if(!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 0;
+  return Math.max(0, Math.round((end - start) / 1000));
+}
 function calcTicketTimes(t, nowDate = new Date()){
   const creado = t.creado ? new Date(t.creado) : null;
   const liberado = t.liberado ? new Date(t.liberado) : null;
@@ -93,6 +100,97 @@ function calcTicketTimes(t, nowDate = new Date()){
 function decorateTicket(t){
   const tiempos = calcTicketTimes(t);
   return {...t, responsableActual:t.tecnico_username || '', tiempos};
+}
+
+function emailEnabled(){
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+function mailList(value){
+  return String(value || '').split(',').map(x => x.trim()).filter(Boolean).join(',');
+}
+function makeTransporter(){
+  if(!emailEnabled()) return null;
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+  });
+}
+async function sendMailSafe({to, cc, subject, text}){
+  const finalTo = mailList(to);
+  if(!finalTo || !emailEnabled()) return false;
+  try{
+    const transporter = makeTransporter();
+    await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to: finalTo,
+      cc: mailList(cc) || undefined,
+      subject,
+      text
+    });
+    return true;
+  }catch(e){
+    console.error('No se pudo enviar correo:', e.message);
+    return false;
+  }
+}
+function ticketText(t, titulo){
+  const x = calcTicketTimes(t);
+  return `${titulo}\n\nTicket: ${t.id || ''}\nActivo: ${t.activo || ''} - ${t.activo_descripcion || ''}\nÁrea: ${t.area || ''}\nUbicación: ${t.ubicacion || ''}\nPrioridad: ${t.prioridad || ''}\nTipo de falla: ${t.tipo_falla || ''}\nEstado: ${t.estado || ''}\nTécnico: ${t.tecnico_username || ''}\n\nFalla:\n${t.falla || ''}\n\nDiagnóstico:\n${t.diagnostico || ''}\n\nSolución:\n${t.solucion || ''}\n\nSolicita: ${t.solicitante || ''}\nTel/ext: ${t.telefono_solicitante || ''}\n\nTiempos:\nTotal muerto: ${x.muertoTotalMin} min\nMTTO real: ${x.mttoMin} min\nProducción/espera: ${x.produccionMin} min\n\nSistema: ${process.env.APP_URL || ''}`;
+}
+async function getTechEmail(username){
+  if(!username) return '';
+  const r = await pool.query('select correo from users where lower(username)=lower($1) limit 1', [username]);
+  return r.rows[0]?.correo || '';
+}
+async function notifyTicketCreated(t){
+  await sendMailSafe({
+    to: process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
+    subject: `Nuevo ticket IBS ${t.id} · ${t.activo || ''}`,
+    text: ticketText(t, 'Nuevo ticket de mantenimiento IBS')
+  });
+}
+async function notifyTicketAssigned(t){
+  const techEmail = await getTechEmail(t.tecnico_username);
+  await sendMailSafe({
+    to: techEmail || process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
+    cc: process.env.EMAIL_MTTO_TO,
+    subject: `Ticket asignado IBS ${t.id} · ${t.activo || ''}`,
+    text: ticketText(t, 'Ticket asignado')
+  });
+}
+async function notifyTicketFinished(t){
+  await sendMailSafe({
+    to: process.env.EMAIL_PRODUCCION_TO || process.env.EMAIL_ALERTS_TO,
+    cc: process.env.EMAIL_MTTO_TO,
+    subject: `Ticket pendiente de validación ${t.id} · ${t.activo || ''}`,
+    text: ticketText(t, 'Reparación terminada. Pendiente validación/liberación')
+  });
+}
+async function notifyTicketReleased(t){
+  await sendMailSafe({
+    to: process.env.EMAIL_ALERTS_TO || process.env.EMAIL_MTTO_TO,
+    cc: process.env.EMAIL_PRODUCCION_TO,
+    subject: `Ticket liberado IBS ${t.id} · ${t.activo || ''}`,
+    text: ticketText(t, 'Equipo liberado')
+  });
+}
+function addGroup(map, key, t){
+  const k = clean(key) || 'Sin dato';
+  if(!map[k]) map[k] = { cantidad:0, muertoTotalMin:0, mttoMin:0, produccionMin:0, esperaInicioMin:0, esperaValidacionMin:0 };
+  const x = calcTicketTimes(t);
+  map[k].cantidad++;
+  map[k].muertoTotalMin += x.muertoTotalMin;
+  map[k].mttoMin += x.mttoMin;
+  map[k].produccionMin += x.produccionMin;
+  map[k].esperaInicioMin += x.esperaInicioMin;
+  map[k].esperaValidacionMin += x.esperaValidacionMin;
+}
+function rankFromMap(map, limit=10){
+  return Object.entries(map).map(([nombre, v]) => ({nombre, ...v}))
+    .sort((a,b) => (b.muertoTotalMin - a.muertoTotalMin) || (b.cantidad - a.cantidad))
+    .slice(0, limit);
 }
 
 async function initDb(){
@@ -641,6 +739,7 @@ app.get('/api/reportes', requireLogin, async (req,res)=>{
     pool.query('select count(*)::int n from users')
   ]);
   let mttoMin=0, produccionMin=0, muertoTotalMin=0, esperaInicioMin=0, esperaValidacionMin=0;
+  const porActivoMap = {}, porAreaMap = {}, porTecnicoMap = {}, porFallaMap = {}, porPrioridadMap = {}, porSucursalMap = {};
   for(const t of allTickets.rows){
     const x = calcTicketTimes(t);
     mttoMin += x.mttoMin;
@@ -648,10 +747,40 @@ app.get('/api/reportes', requireLogin, async (req,res)=>{
     muertoTotalMin += x.muertoTotalMin;
     esperaInicioMin += x.esperaInicioMin;
     esperaValidacionMin += x.esperaValidacionMin;
+    addGroup(porActivoMap, `${t.activo || 'Sin activo'} · ${t.activo_descripcion || ''}`.trim(), t);
+    addGroup(porAreaMap, t.area, t);
+    addGroup(porTecnicoMap, t.tecnico_username || 'Sin técnico', t);
+    addGroup(porFallaMap, t.tipo_falla || 'Sin tipo', t);
+    addGroup(porPrioridadMap, t.prioridad || 'Normal', t);
+    addGroup(porSucursalMap, t.sucursal || 'Sin sucursal', t);
   }
   const abiertos = allTickets.rows.filter(t=>t.estado !== 'Liberado').length;
   const obj = rows => Object.fromEntries(rows.map(x=>[x.estado||x.area||x.tipo,x.n]));
-  res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado:obj(est.rows), porArea:obj(area.rows), porTipoFalla:obj(tipo.rows) });
+  const eficienciaTecnicos = rankFromMap(porTecnicoMap, 20).map(x => ({
+    ...x,
+    promedioMttoMin: x.cantidad ? Math.round(x.mttoMin / x.cantidad) : 0,
+    promedioMuertoMin: x.cantidad ? Math.round(x.muertoTotalMin / x.cantidad) : 0
+  }));
+  res.json({
+    totalTickets:allTickets.rows.length,
+    abiertos,
+    totalActivos:act.rows[0].n,
+    totalEmpleados:emp.rows[0].n,
+    mttoMin,
+    produccionMin,
+    muertoTotalMin,
+    esperaInicioMin,
+    esperaValidacionMin,
+    porEstado:obj(est.rows),
+    porArea:obj(area.rows),
+    porTipoFalla:obj(tipo.rows),
+    topActivos:rankFromMap(porActivoMap, 10),
+    topAreasTiempo:rankFromMap(porAreaMap, 10),
+    topTecnicos:eficienciaTecnicos,
+    topFallas:rankFromMap(porFallaMap, 10),
+    topPrioridades:rankFromMap(porPrioridadMap, 10),
+    topSucursales:rankFromMap(porSucursalMap, 10)
+  });
 });
 app.get('/api/export/excel', requireCanExport, async (req,res)=>{
   const [tickets, activos, users] = await Promise.all([pool.query('select * from tickets order by creado desc'),pool.query('select * from activos order by numero'),pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')]);
@@ -668,6 +797,19 @@ app.get('/api/export/excel', requireCanExport, async (req,res)=>{
     };
   });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ticketRows), 'Tickets');
+  const mapas = { porActivo:{}, porArea:{}, porTecnico:{}, porFalla:{}, porSucursal:{} };
+  for(const t of tickets.rows){
+    addGroup(mapas.porActivo, `${t.activo || 'Sin activo'} · ${t.activo_descripcion || ''}`.trim(), t);
+    addGroup(mapas.porArea, t.area, t);
+    addGroup(mapas.porTecnico, t.tecnico_username || 'Sin técnico', t);
+    addGroup(mapas.porFalla, t.tipo_falla || 'Sin tipo', t);
+    addGroup(mapas.porSucursal, t.sucursal || 'Sin sucursal', t);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porActivo, 500)), 'Ranking Activos');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porArea, 200)), 'Ranking Areas');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porTecnico, 200)), 'Ranking Tecnicos');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porFalla, 200)), 'Ranking Fallas');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rankFromMap(mapas.porSucursal, 200)), 'Ranking Sucursales');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(activos.rows), 'Activos');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users.rows), 'Usuarios');
   const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
