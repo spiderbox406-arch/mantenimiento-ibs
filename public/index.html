@@ -19,6 +19,14 @@
 <script>
 let me=null, activos=[], empleados=[], tecnicos=[], tickets=[], reportes=null, vista='panel', selectedAsset=null;
 const app=document.getElementById('app');
+window.addEventListener('unhandledrejection', ev => {
+  try{ hideLoading(); }catch(e){}
+  console.error(ev.reason);
+});
+window.addEventListener('error', ev => {
+  try{ hideLoading(); }catch(e){}
+  console.error(ev.error || ev.message);
+});
 let loadingCount=0;
 function showLoading(msg='Cargando...'){loadingCount++;const o=document.getElementById('loadingOverlay');const t=document.getElementById('loadingText');if(t)t.textContent=msg;if(o)o.style.display='flex'}
 function hideLoading(){loadingCount=Math.max(0,loadingCount-1);if(loadingCount===0){const o=document.getElementById('loadingOverlay');if(o)o.style.display='none'}}
@@ -33,7 +41,24 @@ function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,
 function isAdmin(){return me && me.role==='admin'}
 function canExport(){return me && (me.role==='admin' || me.can_export===true)}
 function normalize(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
-async function api(url,opts={}){const r=await fetch(url,opts);if(!r.ok){let e;try{e=(await r.json()).error}catch(_){e=await r.text()}throw new Error(e||'Error')}return r.headers.get('content-type')?.includes('json')?r.json():r.text()}
+async function api(url,opts={}){
+  const r = await fetch(url,opts);
+  const raw = await r.text();
+  let data = null;
+
+  try{
+    data = raw ? JSON.parse(raw) : null;
+  }catch(e){
+    data = raw;
+  }
+
+  if(!r.ok){
+    const msg = (data && data.error) ? data.error : (typeof data === 'string' ? data : 'Error del servidor');
+    throw new Error(msg);
+  }
+
+  return data;
+}
 async function boot(){try{let r=await api('/api/me');me=r.user;if(me)render();else login()}catch(e){login()}}
 function login(){document.getElementById('mainHeader').style.display='none';app.style.maxWidth='none';app.style.padding='0';app.innerHTML=`<section class="login-page"><div class="login-left"><div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas"></div><h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1><p class="login-subtitle">Control general de tickets, activos, empleados, tiempos muertos y reportes internos.</p><div class="machine-strip"><div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Activos industriales</small></div><div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario y seguimiento</small></div><div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div><div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Tiempos y reportes</small></div></div></div><div class="login-right"><div class="login-card"><div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div><h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p><label>Usuario</label><input id="u" autocomplete="username" placeholder="Usuario"><label>Contraseña</label><input id="p" type="password" autocomplete="current-password" placeholder="Contraseña"><button class="btn-orange" onclick="doLogin()">Entrar al sistema</button><div class="login-footer">Interbandas · Mantenimiento IBS<br>Sin contraseña guardada en el navegador</div></div></div></section>`;setTimeout(()=>document.getElementById('u').focus(),50)}
 async function doLogin(){showLoading('Iniciando sesión...');try{const r=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u.value,password:p.value})});me=r.user;document.getElementById('p').value='';render()}catch(e){alert('No entró: '+e.message)}finally{hideLoading()}}
