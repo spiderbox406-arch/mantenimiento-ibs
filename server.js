@@ -56,25 +56,76 @@ function getMailer(){
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
   });
 }
+function uniqueEmails(list){
+  return [...new Set((list || [])
+    .map(x => String(x || '').trim())
+    .filter(x => x && x.includes('@')))];
+}
+async function getEmailsByRoles(roles = []){
+  const r = await pool.query(
+    `select correo from users
+     where status='activo'
+       and correo is not null
+       and trim(correo) <> ''
+       and role = any($1)
+     order by name`,
+    [roles]
+  );
+  return uniqueEmails(r.rows.map(x => x.correo));
+}
+async function getEmailsByRoleAndArea(roles = [], area = ''){
+  const areaClean = clean(area).toLowerCase();
+  const r = await pool.query(
+    `select correo from users
+     where status='activo'
+       and correo is not null
+       and trim(correo) <> ''
+       and role = any($1)
+       and (
+         $2 = ''
+         or lower(coalesce(area_asignada,'')) = $2
+         or lower(coalesce(area_asignada,'')) = 'mantenimiento'
+         or lower(coalesce(area_asignada,'')) = 'mtto'
+       )
+     order by name`,
+    [roles, areaClean]
+  );
+  return uniqueEmails(r.rows.map(x => x.correo));
+}
+async function getUserEmail(username){
+  if(!username) return '';
+  const r = await pool.query(
+    `select correo from users
+     where lower(username)=lower($1)
+       and status='activo'
+       and correo is not null
+       and trim(correo) <> ''
+     limit 1`,
+    [username]
+  );
+  return r.rows[0]?.correo || '';
+}
 async function sendMailSafe({to, cc, subject, text, html}){
   try{
     if(!emailConfigured()){
       console.log('Correo no configurado. Se omite:', subject);
       return {ok:false, skipped:true};
     }
-    if(!to){
+    const toList = uniqueEmails(Array.isArray(to) ? to : String(to || '').split(','));
+    const ccList = uniqueEmails(Array.isArray(cc) ? cc : String(cc || '').split(','));
+    if(!toList.length){
       console.log('Correo sin destinatario. Se omite:', subject);
       return {ok:false, skipped:true};
     }
     const info = await getMailer().sendMail({
       from: process.env.EMAIL_FROM,
-      to,
-      cc: cc || undefined,
+      to: toList.join(','),
+      cc: ccList.length ? ccList.join(',') : undefined,
       subject,
       text,
       html
     });
-    console.log('Correo enviado:', info.messageId || subject);
+    console.log('Correo enviado:', info.messageId || subject, 'TO:', toList.join(','));
     return {ok:true};
   }catch(e){
     console.error('Error enviando correo:', e.message);
@@ -93,10 +144,10 @@ function ticketMailHtml(title, t){
     <p><b>Prioridad:</b> ${t.prioridad || ''}</p>
     <p><b>Tipo de falla:</b> ${t.tipo_falla || ''}</p>
     <p><b>Estado:</b> ${t.estado || ''}</p>
-    <p><b>Falla:</b><br>${String(t.falla || '').replace(/\\n/g,'<br>')}</p>
+    <p><b>Falla:</b><br>${String(t.falla || '').replace(/\n/g,'<br>')}</p>
     ${t.tecnico_username ? `<p><b>Técnico:</b> ${t.tecnico_username}</p>` : ''}
-    ${t.diagnostico ? `<p><b>Diagnóstico:</b><br>${String(t.diagnostico).replace(/\\n/g,'<br>')}</p>` : ''}
-    ${t.solucion ? `<p><b>Solución:</b><br>${String(t.solucion).replace(/\\n/g,'<br>')}</p>` : ''}
+    ${t.diagnostico ? `<p><b>Diagnóstico:</b><br>${String(t.diagnostico).replace(/\n/g,'<br>')}</p>` : ''}
+    ${t.solucion ? `<p><b>Solución:</b><br>${String(t.solucion).replace(/\n/g,'<br>')}</p>` : ''}
     <hr><p style="font-size:12px;color:#666">Sistema Mantenimiento IBS · Interbandas</p>
   </div>`;
 }
@@ -118,34 +169,44 @@ Diagnóstico: ${t.diagnostico || ''}
 Solución: ${t.solucion || ''}`;
 }
 async function notifyTicketCreated(t){
+  const to = await getEmailsByRoleAndArea(['tecnico','mantenimiento'], t.area);
+  const cc = await getEmailsByRoles(['gerente','admin']);
   return sendMailSafe({
-    to: process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO || process.env.SMTP_USER,
+    to: to.length ? to : (process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO || process.env.SMTP_USER),
+    cc,
     subject: `Nuevo ticket IBS ${t.id} - ${t.activo || ''}`,
     text: ticketMailText('Nuevo ticket de mantenimiento', t),
     html: ticketMailHtml('Nuevo ticket de mantenimiento', t)
   });
 }
-async function notifyTicketAssigned(t, tecnicoCorreo){
+async function notifyTicketAssigned(t){
+  const tecnicoCorreo = await getUserEmail(t.tecnico_username);
+  const cc = await getEmailsByRoles(['gerente','admin']);
   return sendMailSafe({
     to: tecnicoCorreo || process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
-    cc: process.env.EMAIL_MTTO_CC || undefined,
+    cc,
     subject: `Ticket asignado ${t.id} - ${t.activo || ''}`,
     text: ticketMailText('Ticket asignado', t),
     html: ticketMailHtml('Ticket asignado', t)
   });
 }
 async function notifyTicketFinished(t){
+  const to = await getEmailsByRoleAndArea(['operaciones','produccion','producción'], t.area);
+  const cc = await getEmailsByRoles(['gerente','admin']);
   return sendMailSafe({
-    to: process.env.EMAIL_PRODUCCION_TO || process.env.EMAIL_ALERTS_TO || process.env.EMAIL_MTTO_TO,
-    cc: process.env.EMAIL_MTTO_CC || undefined,
+    to: to.length ? to : (process.env.EMAIL_PRODUCCION_TO || process.env.EMAIL_ALERTS_TO || process.env.EMAIL_MTTO_TO),
+    cc,
     subject: `Pendiente liberación ${t.id} - ${t.activo || ''}`,
     text: ticketMailText('Equipo pendiente de liberación por producción', t),
     html: ticketMailHtml('Equipo pendiente de liberación por producción', t)
   });
 }
 async function notifyTicketReleased(t){
+  const tecnicoCorreo = await getUserEmail(t.tecnico_username);
+  const cc = await getEmailsByRoles(['gerente','admin']);
   return sendMailSafe({
-    to: process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
+    to: tecnicoCorreo || process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
+    cc,
     subject: `Ticket liberado ${t.id} - ${t.activo || ''}`,
     text: ticketMailText('Ticket liberado', t),
     html: ticketMailHtml('Ticket liberado', t)
@@ -472,7 +533,7 @@ app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async 
 
 
 app.post('/api/test-email', requireAdmin, async (req,res)=>{
-  const to = clean(req.body.to || process.env.EMAIL_ALERTS_TO || process.env.SMTP_USER);
+  const to = clean(req.body.to || process.env.SMTP_USER);
   const result = await sendMailSafe({
     to,
     subject: 'Prueba correo Mantenimiento IBS',
@@ -499,8 +560,7 @@ app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
   const tecnico = clean(req.body.tecnico_username);
   const up = await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2 returning *",[tecnico,req.params.id]);
   await logAction(req.session.user.id,'assign_ticket',{id:req.params.id});
-  const tec = await pool.query("select correo from users where lower(username)=lower($1) limit 1",[tecnico]);
-  if(up.rows[0]) await notifyTicketAssigned(up.rows[0], tec.rows[0]?.correo);
+  if(up.rows[0]) await notifyTicketAssigned(up.rows[0]);
   res.json({ok:true});
 });
 app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='En atención', iniciado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'start_ticket',{id:req.params.id}); res.json({ok:true}); });
