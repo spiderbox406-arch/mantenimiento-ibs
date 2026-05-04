@@ -40,8 +40,58 @@ async function render(){if(!me)return login();showLoading('Cargando sistema...')
 app.innerHTML=`${hero()}${me.must_change_password?changePassCard():''}${tabs()}${vista==='panel'?panel():vista==='tickets'?ticketsView():vista==='activos'?activosView():vista==='empleados'?empleadosView():vista==='reportes'?reportesView():usuariosView()}`;}finally{hideLoading()}}
 function hero(){return `<section class="hero"><h2>Panel de mantenimiento industrial</h2><p>Activos, empleados, reportes, tiempos muertos de MTTO y tiempos cargados a producción.</p></section>`}
 function tabs(){return `<div class="tabs"><button class="tab ${vista==='panel'?'active':''}" onclick="vista='panel';render()">Panel</button><button class="tab ${vista==='tickets'?'active':''}" onclick="vista='tickets';render()">Tickets</button><button class="tab ${vista==='activos'?'active':''}" onclick="vista='activos';render()">Activos</button>${isAdmin()?`<button class="tab ${vista==='empleados'?'active':''}" onclick="vista='empleados';render()">Empleados</button><button class="tab ${vista==='usuarios'?'active':''}" onclick="vista='usuarios';render()">Usuarios</button>`:''}<button class="tab ${vista==='reportes'?'active':''}" onclick="vista='reportes';render()">Reportes</button></div>`}
-function changePassCard(){return `<div class="card" style="border:2px solid var(--orange)"><h2>Cambio de contraseña requerido</h2><div class="grid3"><input id="oldPass" type="password" placeholder="Contraseña actual"><input id="newPass" type="password" placeholder="Nueva contraseña"><input id="newPass2" type="password" placeholder="Confirmar nueva contraseña"></div><button class="btn-orange" onclick="changePass()">Cambiar contraseña</button></div>`}
-async function changePass(){if(newPass.value!==newPass2.value)return alert('Las contraseñas no coinciden');await api('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({oldPassword:oldPass.value,newPassword:newPass.value})});alert('Contraseña actualizada');me.must_change_password=false;render()}
+function changePassCard(){return `<div class="card" style="border:2px solid var(--orange)">
+  <h2>Cambio de contraseña requerido</h2>
+  <p class="muted">Escribe tu contraseña actual y una nueva contraseña de mínimo 6 caracteres.</p>
+  <div class="grid3">
+    <input id="oldPass" type="password" placeholder="Contraseña actual" autocomplete="current-password">
+    <input id="newPass" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
+    <input id="newPass2" type="password" placeholder="Confirmar nueva contraseña" autocomplete="new-password">
+  </div>
+  <button id="btnChangePass" type="button" class="btn-orange" onclick="changePass()">Cambiar contraseña</button>
+</div>`}
+async function changePass(){
+  const oldEl=document.getElementById('oldPass');
+  const newEl=document.getElementById('newPass');
+  const new2El=document.getElementById('newPass2');
+  const btn=document.getElementById('btnChangePass');
+
+  const oldPassword=oldEl ? oldEl.value.trim() : '';
+  const newPassword=newEl ? newEl.value.trim() : '';
+  const newPassword2=new2El ? new2El.value.trim() : '';
+
+  if(!oldPassword) return alert('Escribe tu contraseña actual');
+  if(newPassword.length < 6) return alert('La nueva contraseña debe tener mínimo 6 caracteres');
+  if(newPassword !== newPassword2) return alert('Las contraseñas no coinciden');
+
+  showLoading('Cambiando contraseña...');
+  if(btn){btn.disabled=true;btn.textContent='Guardando...';}
+
+  try{
+    const r=await api('/api/change-password',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({oldPassword,newPassword})
+    });
+
+    if(r.user){
+      me=r.user;
+    }else{
+      const fresh=await api('/api/me');
+      me=fresh.user || me;
+    }
+
+    if(me) me.must_change_password=false;
+
+    alert('Contraseña actualizada correctamente');
+    await render();
+  }catch(e){
+    alert('No se pudo cambiar la contraseña: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Cambiar contraseña';}
+    hideLoading();
+  }
+}
 function kpis(){return `<div class="kpis"><div class="kpi"><b>${reportes.totalTickets}</b>Tickets</div><div class="kpi"><b>${reportes.abiertos}</b>Abiertos</div><div class="kpi"><b>${reportes.totalActivos}</b>Activos</div><div class="kpi"><b>${reportes.totalEmpleados}</b>Usuarios</div><div class="kpi"><b>${reportes.muertoTotalMin||0} min</b>Muerto total</div><div class="kpi"><b>${reportes.mttoMin||0} min</b>MTTO / <small>${reportes.produccionMin||0} prod</small></div></div>`}
 function panel(){return `${kpis()}${crearTicketCard()}${tablaTickets(tickets.slice(0,10))}`}
 function assetSearchBlock(){return `<label>Buscar activo / herramienta</label><input id="assetQuery" placeholder="Busca por número, descripción, área, tipo, sucursal, ubicación, marca, usuario o estatus" oninput="assetSuggest(this.value)"><div id="assetResults" class="asset-results" style="display:none"></div><div id="assetSelected">${selectedAsset?selectedAssetHtml(selectedAsset):''}</div>`}
