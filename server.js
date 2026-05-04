@@ -206,8 +206,11 @@ async function initDb(){
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS produccion_min int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_reporte jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_trabajo jsonb NOT NULL DEFAULT '[]'::jsonb;
-  `);
-
+  await pool.query(`
+  UPDATE tickets
+  SET estado = 'Reportado'
+  WHERE estado IS NULL OR trim(estado) = '';
+`);
 
   // Reparar ID de tickets en bases antiguas:
   // Si id es numérico, se agrega secuencia.
@@ -434,12 +437,64 @@ app.get('/api/tickets', requireLogin, async (req,res)=>{
   const r=await pool.query(`select * from tickets ${where} order by creado desc limit 1000`, params);
   res.json(r.rows.map(decorateTicket));
 });
-app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), async (req,res)=>{
-  const t=req.body; if(!clean(t.falla)) return res.status(400).json({error:'Describe la falla.'});
-  const fotosReporte = (req.files || []).map(f => '/uploads/' + f.filename);
-  const r=await pool.query(`insert into tickets(activo,activo_descripcion,area,sucursal,ubicacion,solicitante,empleado_solicitante,telefono_solicitante,falla,prioridad,tipo_falla,created_by,fotos_reporte) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`, [clean(t.activo),clean(t.activo_descripcion),clean(t.area),clean(t.sucursal),clean(t.ubicacion),clean(t.solicitante),clean(t.empleado_solicitante),clean(t.telefono_solicitante),clean(t.falla),clean(t.prioridad||'Normal'),clean(t.tipo_falla),req.session.user.id,JSON.stringify(fotosReporte)]);
-  await logAction(req.session.user.id, 'create_ticket', {ticket:r.rows[0].id, activo:t.activo});
-  res.json(r.rows[0]);
+app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), async (req, res) => {
+  try {
+    const t = req.body;
+
+    if (!clean(t.falla)) {
+      return res.status(400).json({ error: 'Describe la falla.' });
+    }
+
+    const fotosReporte = (req.files || []).map(f => '/uploads/' + f.filename);
+
+    const r = await pool.query(`
+      INSERT INTO tickets (
+        activo,
+        activo_descripcion,
+        area,
+        sucursal,
+        ubicacion,
+        solicitante,
+        empleado_solicitante,
+        telefono_solicitante,
+        falla,
+        prioridad,
+        tipo_falla,
+        estado,
+        created_by,
+        fotos_reporte
+      )
+      VALUES (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Reportado',$12,$13
+      )
+      RETURNING *
+    `, [
+      clean(t.activo),
+      clean(t.activo_descripcion),
+      clean(t.area),
+      clean(t.sucursal),
+      clean(t.ubicacion),
+      clean(t.solicitante),
+      clean(t.empleado_solicitante),
+      clean(t.telefono_solicitante),
+      clean(t.falla),
+      clean(t.prioridad || 'Normal'),
+      clean(t.tipo_falla),
+      req.session.user.id,
+      JSON.stringify(fotosReporte)
+    ]);
+
+    await logAction(req.session.user.id, 'create_ticket', {
+      ticket: r.rows[0].id,
+      activo: t.activo
+    });
+
+    res.json(r.rows[0]);
+
+  } catch (err) {
+    console.error('Error creando ticket:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2",[clean(req.body.tecnico_username),req.params.id]); await logAction(req.session.user.id,'assign_ticket',{id:req.params.id}); res.json({ok:true}); });
 app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='En atención', iniciado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'start_ticket',{id:req.params.id}); res.json({ok:true}); });
