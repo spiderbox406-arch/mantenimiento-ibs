@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const { Pool } = require('pg');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,6 +20,24 @@ const pool = new Pool({
   ssl: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') ? { rejectUnauthorized: false } : false
 });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+
+const uploadDir = path.join(__dirname, 'public', 'uploads');
+fs.mkdirSync(uploadDir, { recursive: true });
+const imageStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    cb(null, Date.now() + '_' + safeName);
+  }
+});
+const uploadImages = multer({
+  storage: imageStorage,
+  limits: { fileSize: 8 * 1024 * 1024, files: 6 },
+  fileFilter: (req, file, cb) => {
+    if(!file.mimetype.startsWith('image/')) return cb(new Error('Solo se permiten imágenes.'));
+    cb(null, true);
+  }
+});
 
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -38,179 +57,16 @@ function clean(v){ return String(v ?? '').trim(); }
 function norm(v){ return clean(v).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
 function requireLogin(req,res,next){ if(!req.session.user) return res.status(401).json({error:'Sesión vencida. Inicia sesión otra vez.'}); next(); }
 function requireAdmin(req,res,next){ if(!req.session.user || req.session.user.role !== 'admin') return res.status(403).json({error:'Solo administrador.'}); next(); }
+function canExportExcel(req){
+  return Boolean(req.session.user && (req.session.user.role === 'admin' || req.session.user.can_export === true));
+}
+function requireCanExport(req,res,next){
+  if(!canExportExcel(req)) return res.status(403).json({error:'No tienes permiso para exportar Excel.'});
+  next();
+}
 function publicUser(u){ if(!u) return null; const { password_hash, failed_login_attempts, ...safe } = u; return safe; }
 async function logAction(userId, action, details = {}){
   try { await pool.query('insert into user_activity_log(user_id, action, details) values($1,$2,$3)', [userId || null, action, JSON.stringify(details)]); } catch(e){ console.error('logAction', e.message); }
-}
-
-
-function emailConfigured(){
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS && process.env.EMAIL_FROM);
-}
-function getMailer(){
-  if(!emailConfigured()) return null;
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-  });
-}
-function uniqueEmails(list){
-  return [...new Set((list || [])
-    .map(x => String(x || '').trim())
-    .filter(x => x && x.includes('@')))];
-}
-async function getEmailsByRoles(roles = []){
-  const r = await pool.query(
-    `select correo from users
-     where status='activo'
-       and correo is not null
-       and trim(correo) <> ''
-       and role = any($1)
-     order by name`,
-    [roles]
-  );
-  return uniqueEmails(r.rows.map(x => x.correo));
-}
-async function getEmailsByRoleAndArea(roles = [], area = ''){
-  const areaClean = clean(area).toLowerCase();
-  const r = await pool.query(
-    `select correo from users
-     where status='activo'
-       and correo is not null
-       and trim(correo) <> ''
-       and role = any($1)
-       and (
-         $2 = ''
-         or lower(coalesce(area_asignada,'')) = $2
-         or lower(coalesce(area_asignada,'')) = 'mantenimiento'
-         or lower(coalesce(area_asignada,'')) = 'mtto'
-       )
-     order by name`,
-    [roles, areaClean]
-  );
-  return uniqueEmails(r.rows.map(x => x.correo));
-}
-async function getUserEmail(username){
-  if(!username) return '';
-  const r = await pool.query(
-    `select correo from users
-     where lower(username)=lower($1)
-       and status='activo'
-       and correo is not null
-       and trim(correo) <> ''
-     limit 1`,
-    [username]
-  );
-  return r.rows[0]?.correo || '';
-}
-async function sendMailSafe({to, cc, subject, text, html}){
-  try{
-    if(!emailConfigured()){
-      console.log('Correo no configurado. Se omite:', subject);
-      return {ok:false, skipped:true};
-    }
-    const toList = uniqueEmails(Array.isArray(to) ? to : String(to || '').split(','));
-    const ccList = uniqueEmails(Array.isArray(cc) ? cc : String(cc || '').split(','));
-    if(!toList.length){
-      console.log('Correo sin destinatario. Se omite:', subject);
-      return {ok:false, skipped:true};
-    }
-    const info = await getMailer().sendMail({
-      from: process.env.EMAIL_FROM,
-      to: toList.join(','),
-      cc: ccList.length ? ccList.join(',') : undefined,
-      subject,
-      text,
-      html
-    });
-    console.log('Correo enviado:', info.messageId || subject, 'TO:', toList.join(','));
-    return {ok:true};
-  }catch(e){
-    console.error('Error enviando correo:', e.message);
-    return {ok:false, error:e.message};
-  }
-}
-function ticketMailHtml(title, t){
-  return `<div style="font-family:Arial,sans-serif;line-height:1.45">
-    <h2 style="color:#ff6a00">${title}</h2>
-    <p><b>Ticket:</b> ${t.id}</p>
-    <p><b>Activo:</b> ${t.activo || ''} · ${t.activo_descripcion || ''}</p>
-    <p><b>Área:</b> ${t.area || ''}</p>
-    <p><b>Ubicación:</b> ${t.ubicacion || ''}</p>
-    <p><b>Solicitante:</b> ${t.solicitante || ''}</p>
-    <p><b>Teléfono/extensión:</b> ${t.telefono_solicitante || ''}</p>
-    <p><b>Prioridad:</b> ${t.prioridad || ''}</p>
-    <p><b>Tipo de falla:</b> ${t.tipo_falla || ''}</p>
-    <p><b>Estado:</b> ${t.estado || ''}</p>
-    <p><b>Falla:</b><br>${String(t.falla || '').replace(/\n/g,'<br>')}</p>
-    ${t.tecnico_username ? `<p><b>Técnico:</b> ${t.tecnico_username}</p>` : ''}
-    ${t.diagnostico ? `<p><b>Diagnóstico:</b><br>${String(t.diagnostico).replace(/\n/g,'<br>')}</p>` : ''}
-    ${t.solucion ? `<p><b>Solución:</b><br>${String(t.solucion).replace(/\n/g,'<br>')}</p>` : ''}
-    <hr><p style="font-size:12px;color:#666">Sistema Mantenimiento IBS · Interbandas</p>
-  </div>`;
-}
-function ticketMailText(title, t){
-  return `${title}
-
-Ticket: ${t.id}
-Activo: ${t.activo || ''} · ${t.activo_descripcion || ''}
-Área: ${t.area || ''}
-Ubicación: ${t.ubicacion || ''}
-Solicitante: ${t.solicitante || ''}
-Teléfono/extensión: ${t.telefono_solicitante || ''}
-Prioridad: ${t.prioridad || ''}
-Tipo de falla: ${t.tipo_falla || ''}
-Estado: ${t.estado || ''}
-Falla: ${t.falla || ''}
-Técnico: ${t.tecnico_username || ''}
-Diagnóstico: ${t.diagnostico || ''}
-Solución: ${t.solucion || ''}`;
-}
-async function notifyTicketCreated(t){
-  const to = await getEmailsByRoleAndArea(['tecnico','mantenimiento'], t.area);
-  const cc = await getEmailsByRoles(['gerente','admin']);
-  return sendMailSafe({
-    to: to.length ? to : (process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO || process.env.SMTP_USER),
-    cc,
-    subject: `Nuevo ticket IBS ${t.id} - ${t.activo || ''}`,
-    text: ticketMailText('Nuevo ticket de mantenimiento', t),
-    html: ticketMailHtml('Nuevo ticket de mantenimiento', t)
-  });
-}
-async function notifyTicketAssigned(t){
-  const tecnicoCorreo = await getUserEmail(t.tecnico_username);
-  const cc = await getEmailsByRoles(['gerente','admin']);
-  return sendMailSafe({
-    to: tecnicoCorreo || process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
-    cc,
-    subject: `Ticket asignado ${t.id} - ${t.activo || ''}`,
-    text: ticketMailText('Ticket asignado', t),
-    html: ticketMailHtml('Ticket asignado', t)
-  });
-}
-async function notifyTicketFinished(t){
-  const to = await getEmailsByRoleAndArea(['operaciones','produccion','producción'], t.area);
-  const cc = await getEmailsByRoles(['gerente','admin']);
-  return sendMailSafe({
-    to: to.length ? to : (process.env.EMAIL_PRODUCCION_TO || process.env.EMAIL_ALERTS_TO || process.env.EMAIL_MTTO_TO),
-    cc,
-    subject: `Pendiente liberación ${t.id} - ${t.activo || ''}`,
-    text: ticketMailText('Equipo pendiente de liberación por producción', t),
-    html: ticketMailHtml('Equipo pendiente de liberación por producción', t)
-  });
-}
-async function notifyTicketReleased(t){
-  const tecnicoCorreo = await getUserEmail(t.tecnico_username);
-  const cc = await getEmailsByRoles(['gerente','admin']);
-  return sendMailSafe({
-    to: tecnicoCorreo || process.env.EMAIL_MTTO_TO || process.env.EMAIL_ALERTS_TO,
-    cc,
-    subject: `Ticket liberado ${t.id} - ${t.activo || ''}`,
-    text: ticketMailText('Ticket liberado', t),
-    html: ticketMailHtml('Ticket liberado', t)
-  });
 }
 
 function minutesBetween(a, b){
@@ -250,6 +106,7 @@ async function initDb(){
       role text not null default 'operaciones',
       status text not null default 'activo',
       must_change_password boolean not null default false,
+      can_export boolean not null default false,
       area_asignada text,
       sucursal text,
       telefono text,
@@ -292,6 +149,8 @@ async function initDb(){
       tecnico_username text,
       diagnostico text,
       solucion text,
+      fotos_reporte jsonb not null default '[]'::jsonb,
+      fotos_trabajo jsonb not null default '[]'::jsonb,
       creado timestamptz not null default now(),
       asignado timestamptz,
       iniciado timestamptz,
@@ -322,6 +181,7 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS correo text;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts int NOT NULL DEFAULT 0;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until timestamptz;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS can_export boolean NOT NULL DEFAULT false;
 
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS ubicacion text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS marca text;
@@ -344,6 +204,8 @@ async function initDb(){
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS liberado timestamptz;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS mtto_min int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS produccion_min int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_reporte jsonb NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_trabajo jsonb NOT NULL DEFAULT '[]'::jsonb;
   `);
 
   const c = await pool.query('select count(*)::int as n from users');
@@ -352,11 +214,13 @@ async function initDb(){
     await pool.query(`insert into users(name, username, password_hash, role, status, must_change_password) values($1,$2,$3,$4,$5,$6)`, ['Administrador IBS','admin',hash,'admin','activo',true]);
     console.log('Usuario inicial creado: admin / 1234');
   } else {
-    const admin = await pool.query("select id, must_change_password from users where lower(username)='admin' limit 1");
-    if(admin.rows[0]?.must_change_password){
+    // No se reinicia la contraseña del admin en cada arranque.
+    // Solo se corrige si el admin existe pero no tiene password_hash.
+    const admin = await pool.query("select id, password_hash from users where lower(username)='admin' limit 1");
+    if(admin.rows[0] && !admin.rows[0].password_hash){
       const hash = await bcrypt.hash('1234', 12);
-      await pool.query("update users set password_hash=$1, status='activo', role='admin', updated_at=now() where id=$2", [hash, admin.rows[0].id]);
-      console.log('Admin inicial actualizado: admin / 1234');
+      await pool.query("update users set password_hash=$1, status='activo', role='admin', must_change_password=true, updated_at=now() where id=$2", [hash, admin.rows[0].id]);
+      console.log('Admin reparado: admin / 1234');
     }
   }
 }
@@ -365,7 +229,7 @@ async function initDb(){
 app.get('/api/health', async (req,res)=>{
   try{
     const r = await pool.query('select now() as hora');
-    res.json({ok:true, db:'Neon conectado', emailConfigured: emailConfigured(), hora:r.rows[0].hora});
+    res.json({ok:true, db:'Neon conectado', hora:r.rows[0].hora});
   }catch(e){
     res.status(500).json({ok:false, error:e.message});
   }
@@ -403,19 +267,29 @@ app.post('/api/change-password', requireLogin, async (req,res)=>{
   const ok = await bcrypt.compare(oldPassword, user.password_hash);
   if(!ok) return res.status(401).json({error:'La contraseña actual no coincide.'});
   const hash = await bcrypt.hash(newPassword, 12);
-  await pool.query('update users set password_hash=$1, must_change_password=false, updated_at=now() where id=$2', [hash, user.id]);
-  req.session.user.must_change_password = false;
+  const updated = await pool.query(
+    'update users set password_hash=$1, must_change_password=false, failed_login_attempts=0, locked_until=null, updated_at=now() where id=$2 returning *',
+    [hash, user.id]
+  );
+  req.session.user = publicUser(updated.rows[0]);
+  await new Promise(resolve => req.session.save(resolve));
   await logAction(user.id, 'change_password');
   res.json({ok:true});
 });
 
 app.get('/api/bootstrap', requireLogin, async (req,res)=>{
-  const [a,e,t] = await Promise.all([
+  const [a,t] = await Promise.all([
     pool.query('select * from activos order by numero limit 5000'),
-    pool.query('select id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo, created_at, updated_at from users order by name limit 2000'),
-    pool.query("select id, name, username from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by name")
+    pool.query("select id, name, username, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by name")
   ]);
-  res.json({activos:a.rows, empleados:e.rows, tecnicos:t.rows});
+
+  let empleados = [];
+  if(req.session.user.role === 'admin'){
+    const e = await pool.query('select id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo, created_at, updated_at from users order by name limit 2000');
+    empleados = e.rows;
+  }
+
+  res.json({activos:a.rows, empleados, tecnicos:t.rows});
 });
 
 app.get('/api/activos', requireLogin, async (req,res)=>{
@@ -426,7 +300,7 @@ app.get('/api/activos', requireLogin, async (req,res)=>{
   const r = await pool.query(`select * from activos ${where} order by numero limit 1000`, params);
   res.json(r.rows);
 });
-app.post('/api/activos', requireLogin, async (req,res)=>{
+app.post('/api/activos', requireAdmin, async (req,res)=>{
   const a = req.body;
   if(!clean(a.numero) || !clean(a.descripcion)) return res.status(400).json({error:'Número y descripción son obligatorios.'});
   const search = norm([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
@@ -474,7 +348,7 @@ app.get('/api/users', requireAdmin, async (req,res)=>{
   const q = norm(req.query.q || '');
   let params=[], where='';
   if(q){ params.push('%'+q+'%'); where = `where upper(coalesce(numero_empleado,'')||' '||coalesce(name,'')||' '||coalesce(username,'')||' '||coalesce(role,'')||' '||coalesce(area_asignada,'')||' '||coalesce(sucursal,'')||' '||coalesce(status,'')) like $1`; }
-  const r = await pool.query(`select id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo, created_at, updated_at from users ${where} order by name`, params);
+  const r = await pool.query(`select id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo, created_at, updated_at from users ${where} order by name`, params);
   res.json(r.rows);
 });
 app.post('/api/users', requireAdmin, async (req,res)=>{
@@ -489,8 +363,8 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
 });
 app.put('/api/users/:id', requireAdmin, async (req,res)=>{
   const u=req.body;
-  const r=await pool.query(`update users set numero_empleado=$1,name=$2,username=lower($3),role=$4,status=$5,area_asignada=$6,sucursal=$7,telefono=$8,correo=$9,updated_at=now() where id=$10 returning id, numero_empleado, name, username, role, status, must_change_password, area_asignada, sucursal, telefono, correo`,
-    [clean(u.numero_empleado),clean(u.name),clean(u.username),clean(u.role),clean(u.status),clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo),req.params.id]);
+  const r=await pool.query(`update users set numero_empleado=$1,name=$2,username=lower($3),role=$4,status=$5,area_asignada=$6,sucursal=$7,telefono=$8,correo=$9,can_export=$10,updated_at=now() where id=$11 returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo`,
+    [clean(u.numero_empleado),clean(u.name),clean(u.username),clean(u.role),clean(u.status),clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo),Boolean(u.can_export),req.params.id]);
   await logAction(req.session.user.id, 'update_user', {id:req.params.id});
   res.json(r.rows[0]);
 });
@@ -531,40 +405,22 @@ app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async 
   res.json({agregados,actualizados,omitidos,total:rows.length});
 });
 
-
-app.post('/api/test-email', requireAdmin, async (req,res)=>{
-  const to = clean(req.body.to || process.env.SMTP_USER);
-  const result = await sendMailSafe({
-    to,
-    subject: 'Prueba correo Mantenimiento IBS',
-    text: 'Correo de prueba enviado desde Sistema Mantenimiento IBS.',
-    html: '<h2 style="color:#ff6a00">Prueba correo Mantenimiento IBS</h2><p>Correo de prueba enviado correctamente.</p>'
-  });
-  res.json(result);
-});
-
 app.get('/api/tickets', requireLogin, async (req,res)=>{
   const q=norm(req.query.q || ''); let params=[], where='';
   if(q){ params.push('%'+q+'%'); where=`where upper(coalesce(id::text,'')||' '||coalesce(activo,'')||' '||coalesce(activo_descripcion,'')||' '||coalesce(area,'')||' '||coalesce(estado,'')||' '||coalesce(falla,'')||' '||coalesce(solicitante,'')) like $1`; }
   const r=await pool.query(`select * from tickets ${where} order by creado desc limit 1000`, params);
   res.json(r.rows.map(decorateTicket));
 });
-app.post('/api/tickets', requireLogin, async (req,res)=>{
+app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), async (req,res)=>{
   const t=req.body; if(!clean(t.falla)) return res.status(400).json({error:'Describe la falla.'});
-  const r=await pool.query(`insert into tickets(activo,activo_descripcion,area,sucursal,ubicacion,solicitante,empleado_solicitante,telefono_solicitante,falla,prioridad,tipo_falla,created_by) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`, [clean(t.activo),clean(t.activo_descripcion),clean(t.area),clean(t.sucursal),clean(t.ubicacion),clean(t.solicitante),clean(t.empleado_solicitante),clean(t.telefono_solicitante),clean(t.falla),clean(t.prioridad||'Normal'),clean(t.tipo_falla),req.session.user.id]);
+  const fotosReporte = (req.files || []).map(f => '/uploads/' + f.filename);
+  const r=await pool.query(`insert into tickets(activo,activo_descripcion,area,sucursal,ubicacion,solicitante,empleado_solicitante,telefono_solicitante,falla,prioridad,tipo_falla,created_by,fotos_reporte) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`, [clean(t.activo),clean(t.activo_descripcion),clean(t.area),clean(t.sucursal),clean(t.ubicacion),clean(t.solicitante),clean(t.empleado_solicitante),clean(t.telefono_solicitante),clean(t.falla),clean(t.prioridad||'Normal'),clean(t.tipo_falla),req.session.user.id,JSON.stringify(fotosReporte)]);
   await logAction(req.session.user.id, 'create_ticket', {ticket:r.rows[0].id, activo:t.activo});
-  await notifyTicketCreated(r.rows[0]);
   res.json(r.rows[0]);
 });
-app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
-  const tecnico = clean(req.body.tecnico_username);
-  const up = await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2 returning *",[tecnico,req.params.id]);
-  await logAction(req.session.user.id,'assign_ticket',{id:req.params.id});
-  if(up.rows[0]) await notifyTicketAssigned(up.rows[0]);
-  res.json({ok:true});
-});
+app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Asignado', tecnico_username=$1, asignado=now() where id=$2",[clean(req.body.tecnico_username),req.params.id]); await logAction(req.session.user.id,'assign_ticket',{id:req.params.id}); res.json({ok:true}); });
 app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='En atención', iniciado=now() where id=$1",[req.params.id]); await logAction(req.session.user.id,'start_ticket',{id:req.params.id}); res.json({ok:true}); });
-app.post('/api/tickets/:id/terminar', requireLogin, async (req,res)=>{
+app.post('/api/tickets/:id/terminar', requireLogin, uploadImages.array('fotos_trabajo', 6), async (req,res)=>{
   const r=await pool.query('select * from tickets where id=$1',[req.params.id]);
   const t=r.rows[0];
   if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
@@ -572,9 +428,8 @@ app.post('/api/tickets/:id/terminar', requireLogin, async (req,res)=>{
   const iniciado = t.iniciado || now;
   const mttoMin = minutesBetween(iniciado, now);
   const produccionMin = Math.max(0, minutesBetween(t.creado, now) - mttoMin);
-  const up = await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5 returning *",[clean(req.body.diagnostico),clean(req.body.solucion),mttoMin,produccionMin,req.params.id]);
+  await pool.query("update tickets set estado='Pendiente validación', terminado=now(), diagnostico=$1, solucion=$2, mtto_min=$3, produccion_min=$4 where id=$5",[clean(req.body.diagnostico),clean(req.body.solucion),mttoMin,produccionMin,req.params.id]);
   await logAction(req.session.user.id,'finish_ticket',{id:req.params.id, mttoMin, produccionMin});
-  if(up.rows[0]) await notifyTicketFinished(up.rows[0]);
   res.json({ok:true});
 });
 app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
@@ -583,9 +438,8 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
   if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
   const now = new Date();
   const tiempos = calcTicketTimes({...t, liberado: now, estado:'Liberado'}, now);
-  const up = await pool.query("update tickets set estado='Liberado', liberado=now(), mtto_min=$1, produccion_min=$2 where id=$3 returning *",[tiempos.mttoMin, tiempos.produccionMin, req.params.id]);
+  await pool.query("update tickets set estado='Liberado', liberado=now(), mtto_min=$1, produccion_min=$2 where id=$3",[tiempos.mttoMin, tiempos.produccionMin, req.params.id]);
   await logAction(req.session.user.id,'release_ticket',{id:req.params.id, tiempos});
-  if(up.rows[0]) await notifyTicketReleased(up.rows[0]);
   res.json({ok:true, tiempos});
 });
 app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]); await logAction(req.session.user.id,'return_ticket',{id:req.params.id}); res.json({ok:true}); });
@@ -612,7 +466,7 @@ app.get('/api/reportes', requireLogin, async (req,res)=>{
   const obj = rows => Object.fromEntries(rows.map(x=>[x.estado||x.area||x.tipo,x.n]));
   res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado:obj(est.rows), porArea:obj(area.rows), porTipoFalla:obj(tipo.rows) });
 });
-app.get('/api/export/excel', requireLogin, async (req,res)=>{
+app.get('/api/export/excel', requireCanExport, async (req,res)=>{
   const [tickets, activos, users] = await Promise.all([pool.query('select * from tickets order by creado desc'),pool.query('select * from activos order by numero'),pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')]);
   const wb=XLSX.utils.book_new();
   const ticketRows = tickets.rows.map(t => {
