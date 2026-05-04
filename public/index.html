@@ -24,6 +24,9 @@ function showLoading(msg='Cargando...'){loadingCount++;const o=document.getEleme
 function hideLoading(){loadingCount=Math.max(0,loadingCount-1);if(loadingCount===0){const o=document.getElementById('loadingOverlay');if(o)o.style.display='none'}}
 async function withLoading(msg, fn){showLoading(msg);try{return await fn()}finally{hideLoading()}}
 
+function byId(id){return document.getElementById(id)}
+function val(id){const el=byId(id);return el?el.value:''}
+function filesOf(id){const el=byId(id);return el&&el.files?[...el.files]:[]}
 function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]))}
 function fmt(d){return d?new Date(d).toLocaleString():'-'}
 function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replaceAll(' ','')}
@@ -51,38 +54,18 @@ function changePassCard(){return `<div class="card" style="border:2px solid var(
   <button id="btnChangePass" type="button" class="btn-orange" onclick="changePass()">Cambiar contraseña</button>
 </div>`}
 async function changePass(){
-  const oldEl=document.getElementById('oldPass');
-  const newEl=document.getElementById('newPass');
-  const new2El=document.getElementById('newPass2');
-  const btn=document.getElementById('btnChangePass');
-
-  const oldPassword=oldEl ? oldEl.value.trim() : '';
-  const newPassword=newEl ? newEl.value.trim() : '';
-  const newPassword2=new2El ? new2El.value.trim() : '';
-
+  const oldPassword=val('oldPass').trim();
+  const newPassword=val('newPass').trim();
+  const newPassword2=val('newPass2').trim();
+  const btn=byId('btnChangePass');
   if(!oldPassword) return alert('Escribe tu contraseña actual');
   if(newPassword.length < 6) return alert('La nueva contraseña debe tener mínimo 6 caracteres');
   if(newPassword !== newPassword2) return alert('Las contraseñas no coinciden');
-
   showLoading('Cambiando contraseña...');
   if(btn){btn.disabled=true;btn.textContent='Guardando...';}
-
   try{
-    const r=await api('/api/change-password',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({oldPassword,newPassword})
-    });
-
-    if(r.user){
-      me=r.user;
-    }else{
-      const fresh=await api('/api/me');
-      me=fresh.user || me;
-    }
-
-    if(me) me.must_change_password=false;
-
+    const r=await api('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({oldPassword,newPassword})});
+    me = r.user || (await api('/api/me')).user || me;
     alert('Contraseña actualizada correctamente');
     await render();
   }catch(e){
@@ -100,34 +83,72 @@ function assetSuggest(q){const box=document.getElementById('assetResults'); if(!
 function selectAsset(id){selectedAsset=activos.find(a=>String(a.id)===String(id));document.getElementById('assetResults').style.display='none';document.getElementById('assetQuery').value=selectedAsset.numero+' · '+selectedAsset.descripcion;document.getElementById('assetSelected').innerHTML=selectedAssetHtml(selectedAsset)}
 function crearTicketCard(){return `<div class="card"><h2>Reportar falla</h2>${assetSearchBlock()}<div class="grid3"><div><label>Solicitante</label><input id="solicitante" placeholder="Nombre de quien solicita"></div><div><label>Teléfono/extensión</label><input id="telSol" placeholder="Teléfono o extensión"></div><div><label>Prioridad</label><select id="prioridad"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div><div><label>Tipo de falla</label><select id="tipoFalla"><option>Mecánica</option><option>Eléctrica</option><option>Neumática</option><option>Ajuste</option><option>Operador</option><option>Otro</option></select></div><div><label>Número empleado</label><input id="empSol" placeholder="Opcional"></div></div><label>Falla detectada</label><textarea id="falla" placeholder="Describe la falla..."></textarea><label>Fotos de evidencia inicial</label><input id="fotosReporte" type="file" accept="image/*" multiple><button class="btn-orange" onclick="crearTicket()">Crear ticket</button></div>`}
 async function crearTicket(){
- if(!selectedAsset)return alert('Selecciona un activo desde la búsqueda');
- const fd=new FormData();
- fd.append('activo',selectedAsset.numero||'');
- fd.append('activo_descripcion',selectedAsset.descripcion||'');
- fd.append('area',selectedAsset.area||'');
- fd.append('sucursal',selectedAsset.sucursal||'');
- fd.append('ubicacion',selectedAsset.ubicacion||'');
- fd.append('solicitante',solicitante.value);
- fd.append('empleado_solicitante',empSol.value);
- fd.append('telefono_solicitante',telSol.value);
- fd.append('falla',falla.value);
- fd.append('prioridad',prioridad.value);
- fd.append('tipo_falla',tipoFalla.value);
- [...(document.getElementById('fotosReporte')?.files||[])].forEach(f=>fd.append('fotos_reporte',f));
- await api('/api/tickets',{method:'POST',body:fd});
- selectedAsset=null;alert('Ticket creado');render()
+  try{
+    if(!selectedAsset){
+      const q=val('assetQuery');
+      const nq=normalize(q);
+      selectedAsset = activos.find(a=>normalize([a.numero,a.descripcion].join(' ')).includes(nq));
+    }
+    if(!selectedAsset) return alert('Selecciona un activo desde la búsqueda');
+    if(!val('falla').trim()) return alert('Describe la falla');
+    showLoading('Creando ticket...');
+    const fd=new FormData();
+    fd.append('activo',selectedAsset.numero||'');
+    fd.append('activo_descripcion',selectedAsset.descripcion||'');
+    fd.append('area',selectedAsset.area||'');
+    fd.append('sucursal',selectedAsset.sucursal||'');
+    fd.append('ubicacion',selectedAsset.ubicacion||'');
+    fd.append('solicitante',val('solicitante'));
+    fd.append('empleado_solicitante',val('empSol'));
+    fd.append('telefono_solicitante',val('telSol'));
+    fd.append('falla',val('falla'));
+    fd.append('prioridad',val('prioridad')||'Normal');
+    fd.append('tipo_falla',val('tipoFalla'));
+    filesOf('fotosReporte').forEach(f=>fd.append('fotos_reporte',f));
+    await api('/api/tickets',{method:'POST',body:fd});
+    selectedAsset=null;
+    alert('Ticket creado');
+    await render();
+  }catch(e){
+    alert('Error al crear ticket: '+e.message);
+  }finally{
+    hideLoading();
+  }
 }
 function ticketsView(){return `${crearTicketCard()}<div class="card"><h2>Buscar tickets</h2><div class="searchbox"><input id="qTickets" oninput="filterTickets(this.value)" placeholder="Buscar por ticket, activo, estado, área, falla o solicitante"></div><div id="ticketsTable">${tablaTickets(tickets)}</div></div>`}
 function filterTickets(q){const nq=normalize(q);const rows=tickets.filter(t=>normalize([t.id,t.activo,t.activo_descripcion,t.area,t.estado,t.falla,t.solicitante].join(' ')).includes(nq));document.getElementById('ticketsTable').innerHTML=tablaTickets(rows)}
 function acciones(t){let html='';if(t.estado==='Reportado')html+=`<select id="tec_${t.id}">${tecnicos.map(x=>`<option value="${esc(x.username)}">${esc(x.name)}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar</button>`;if(t.estado==='Asignado')html+=`<button class="btn-blue" onclick="iniciar('${t.id}')">Iniciar</button>`;if(t.estado==='En atención')html+=`<textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea><textarea id="sol_${t.id}" placeholder="Solución"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Terminar reparación</button>`;if(t.estado==='Pendiente validación')html+=`<button class="btn-green" onclick="liberar('${t.id}')">Liberar</button><button class="btn-red" onclick="devolver('${t.id}')">Devolver</button>`;return html||'<span class="muted">Sin acciones</span>'}
-async function asignar(id){await api(`/api/tickets/${id}/asignar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tecnico_username:document.getElementById('tec_'+id).value})});render()}async function iniciar(id){await api(`/api/tickets/${id}/iniciar`,{method:'POST'});render()}async function terminar(id){
- const fd=new FormData();
- fd.append('diagnostico',document.getElementById('diag_'+id).value);
- fd.append('solucion',document.getElementById('sol_'+id).value);
- [...(document.getElementById('fotosTrabajo_'+id)?.files||[])].forEach(f=>fd.append('fotos_trabajo',f));
- await api(`/api/tickets/${id}/terminar`,{method:'POST',body:fd});
- render()
-}async function liberar(id){await api(`/api/tickets/${id}/liberar`,{method:'POST'});render()}async function devolver(id){await api(`/api/tickets/${id}/devolver`,{method:'POST'});render()}
+async function asignar(id){
+  showLoading('Asignando ticket...');
+  try{await api(`/api/tickets/${id}/asignar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tecnico_username:val('tec_'+id)})});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function iniciar(id){
+  showLoading('Iniciando atención...');
+  try{await api(`/api/tickets/${id}/iniciar`,{method:'POST'});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function terminar(id){
+  showLoading('Guardando trabajo realizado...');
+  try{
+    const fd=new FormData();
+    fd.append('diagnostico',val('diag_'+id));
+    fd.append('solucion',val('sol_'+id));
+    filesOf('fotosTrabajo_'+id).forEach(f=>fd.append('fotos_trabajo',f));
+    await api(`/api/tickets/${id}/terminar`,{method:'POST',body:fd});
+    await render();
+  }catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function liberar(id){
+  showLoading('Liberando equipo...');
+  try{await api(`/api/tickets/${id}/liberar`,{method:'POST'});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function devolver(id){
+  showLoading('Devolviendo ticket...');
+  try{await api(`/api/tickets/${id}/devolver`,{method:'POST'});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
 function fotosHtml(arr){
   let fotos = [];
   try{ fotos = Array.isArray(arr) ? arr : JSON.parse(arr || '[]'); }catch(e){ fotos=[]; }
@@ -152,6 +173,27 @@ async function resetPass(id){const p=prompt('Nueva contraseña temporal (mínimo
 async function desactivarUsuario(id){if(!confirm('¿Desactivar este usuario? No se borran sus registros.'))return;await api('/api/users/'+id,{method:'DELETE'});render()}
 function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Tiempos muertos reales</h2><p class="muted">Total muerto = desde que se reporta la falla hasta que se libera el equipo. MTTO = desde iniciar reparación hasta terminar reparación. Producción/espera = total muerto menos MTTO.</p><p><b>Tiempo muerto total:</b> ${reportes.muertoTotalMin||0} min</p><p><b>Tiempo cargado a MTTO:</b> ${reportes.mttoMin||0} min</p><div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div><p><b>Tiempo cargado a Producción / espera:</b> ${reportes.produccionMin||0} min</p><div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div><br><div class="grid"><div><b>Espera antes de iniciar reparación:</b><br>${reportes.esperaInicioMin||0} min</div><div><b>Espera validación/liberación:</b><br>${reportes.esperaValidacionMin||0} min</div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}</div>${tablaTickets(tickets)}`}
 function simpleStats(title,obj){return `<div class="card"><h2>${title}</h2>${Object.keys(obj||{}).map(k=>`<p><b>${esc(k)}</b>: ${obj[k]}</p>`).join('')||'<p class="muted">Sin datos</p>'}</div>`}
+
+window.changePass=changePass;
+window.crearTicket=crearTicket;
+window.asignar=asignar;
+window.iniciar=iniciar;
+window.terminar=terminar;
+window.liberar=liberar;
+window.devolver=devolver;
+window.render=render;
+window.salir=salir;
+window.doLogin=doLogin;
+window.assetSuggest=assetSuggest;
+window.selectAsset=selectAsset;
+window.importar=importar;
+window.agregarActivo=agregarActivo;
+window.crearUsuario=crearUsuario;
+window.editarUsuario=editarUsuario;
+window.resetPass=resetPass;
+window.desactivarUsuario=desactivarUsuario;
+
+window.addEventListener('error',e=>{console.error(e.error||e.message);});
 boot();
 </script>
 </body>
