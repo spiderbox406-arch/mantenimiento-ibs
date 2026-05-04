@@ -272,7 +272,7 @@ app.post('/api/change-password', requireLogin, async (req,res)=>{
     [hash, user.id]
   );
   req.session.user = publicUser(updated.rows[0]);
-  await new Promise(resolve => req.session.save(resolve));
+  await new Promise((resolve, reject) => req.session.save(err => err ? reject(err) : resolve()));
   await logAction(user.id, 'change_password');
   res.json({ok:true, user:req.session.user});
 });
