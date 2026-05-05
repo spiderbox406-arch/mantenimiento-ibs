@@ -170,16 +170,33 @@ function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&l
 function fmt(d){return d?new Date(d).toLocaleString():'-'}
 function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replaceAll(' ','')}
 function isAdmin(){return me && me.role==='admin'}
-function canExport(){return me && (me.role==='admin' || me.can_export===true)}
-function isGerencia(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
-function esTecnico(){return me && String(me.role||'').toLowerCase()==='tecnico'}
-function puedeDesignarPersonal(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
+function rolActual(){return String(me?.role||'').toLowerCase()}
+function canExport(){return me && (rolActual()==='admin' || rolActual()==='gerente' || me.can_export===true)}
+function isGerencia(){return me && ['admin','gerente','mantenimiento'].includes(rolActual())}
+function esTecnico(){return me && rolActual()==='tecnico'}
+function puedeDesignarPersonal(){return me && ['admin','gerente','mantenimiento'].includes(rolActual())}
+function camposTecnicoTicket(t){
+  return [
+    t.tecnico_username,
+    t.tecnico,
+    t.tecnico_asignado,
+    t.responsable,
+    t.responsableActual,
+    t.asignado_a,
+    t.asignado
+  ].filter(Boolean).map(x=>String(x).toLowerCase().trim());
+}
+function soyTecnicoAsignado(t){
+  if(!me) return false;
+  const usuario=String(me.username||'').toLowerCase().trim();
+  const nombre=String(me.name||'').toLowerCase().trim();
+  const campos=camposTecnicoTicket(t);
+  return campos.some(x=>x===usuario || x===nombre || x.includes(usuario) || (nombre && x.includes(nombre)));
+}
 function puedeAceptarTicket(t){
   if(!me) return false;
-  const rol = String(me.role||'').toLowerCase();
-  if(['admin','gerente','mantenimiento'].includes(rol)) return true;
-  if(rol==='tecnico') return String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase();
-  return false;
+  if(isGerencia()) return true;
+  return esTecnico() && soyTecnicoAsignado(t);
 }
 function sameKey(a,b){return normalize(a)===normalize(b)}
 function esMatriz(s){return sameKey(s,'CHIHUAHUA')}
@@ -189,102 +206,6 @@ const DEMO_USERS=['demo','test','usuario','prueba','operador','operaciones_demo'
 function isDemoUser(e){return DEMO_USERS.includes(String(e?.username||'').toLowerCase()) || normalize(e?.name||'').includes('demo');}
 function usuariosReales(rows){return (rows||[]).filter(e=>!isDemoUser(e));}
 function clearFields(ids){ids.forEach(id=>{const el=byId(id); if(!el) return; if(el.type==='checkbox') el.checked=false; else el.value='';});}
-
-function fechaValida(v){
-  if(!v) return null;
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? null : d;
-}
-function minEntre(a,b){
-  const da = fechaValida(a);
-  const db = fechaValida(b);
-  if(!da || !db) return 0;
-  return Math.max(0, Math.round((db - da) / 60000));
-}
-function calcTiemposTicket(t){
-  const ahora = new Date();
-  const creado = fechaValida(t.creado);
-  const iniciado = fechaValida(t.iniciado);
-  const terminado = fechaValida(t.terminado);
-  const liberado = fechaValida(t.liberado);
-  const estado = String(t.estado||'');
-
-  let mttoMin = 0;
-  let operacionesMin = 0;
-  let esperaInicioMin = 0;
-  let esperaValidacionMin = 0;
-  let muertoTotalMin = 0;
-
-  if(creado){
-    const finTotal = liberado || ahora;
-    muertoTotalMin = Math.max(0, Math.round((finTotal - creado) / 60000));
-  }
-
-  // OPERACIONES 1: desde que se reporta hasta que MTTO acepta.
-  if(creado && iniciado){
-    esperaInicioMin = Math.max(0, Math.round((iniciado - creado) / 60000));
-  }else if(creado && !iniciado && estado !== 'Liberado'){
-    esperaInicioMin = Math.max(0, Math.round((ahora - creado) / 60000));
-  }
-
-  // MTTO: solo desde que el técnico acepta hasta que finaliza.
-  if(iniciado && terminado){
-    mttoMin = Math.max(0, Math.round((terminado - iniciado) / 60000));
-  }else if(iniciado && !terminado && estado !== 'Liberado'){
-    mttoMin = Math.max(0, Math.round((ahora - iniciado) / 60000));
-  }
-
-  // OPERACIONES 2: desde que MTTO finaliza hasta que usuario libera.
-  if(terminado && liberado){
-    esperaValidacionMin = Math.max(0, Math.round((liberado - terminado) / 60000));
-  }else if(terminado && !liberado && estado !== 'Liberado'){
-    esperaValidacionMin = Math.max(0, Math.round((ahora - terminado) / 60000));
-  }
-
-  operacionesMin = esperaInicioMin + esperaValidacionMin;
-
-  return {
-    muertoTotalMin,
-    mttoMin,
-    produccionMin: operacionesMin,
-    operacionesMin,
-    esperaInicioMin,
-    esperaValidacionMin
-  };
-}
-function prepararTicketsYTiempos(){
-  tickets = (tickets||[]).map(t=>({...t, tiempos: calcTiemposTicket(t)}));
-  const base = reportes || {};
-  const calc = {
-    totalTickets: tickets.length,
-    abiertos: tickets.filter(t=>String(t.estado||'') !== 'Liberado').length,
-    totalActivos: activos.length,
-    totalEmpleados: empleados.length,
-    muertoTotalMin: 0,
-    mttoMin: 0,
-    produccionMin: 0,
-    esperaInicioMin: 0,
-    esperaValidacionMin: 0,
-    porEstado: {}, porSucursal: {}, porArea: {}, porTipoFalla: {}, porActivo: {}, porTecnico: {}
-  };
-  tickets.forEach(t=>{
-    const tt = t.tiempos || calcTiemposTicket(t);
-    calc.muertoTotalMin += tt.muertoTotalMin || 0;
-    calc.mttoMin += tt.mttoMin || 0;
-    calc.produccionMin += tt.produccionMin || 0;
-    calc.esperaInicioMin += tt.esperaInicioMin || 0;
-    calc.esperaValidacionMin += tt.esperaValidacionMin || 0;
-    calc.porEstado[t.estado||'Sin estado'] = (calc.porEstado[t.estado||'Sin estado']||0)+1;
-    calc.porSucursal[t.sucursal||'Sin sucursal'] = (calc.porSucursal[t.sucursal||'Sin sucursal']||0)+1;
-    calc.porArea[t.area||'Sin área'] = (calc.porArea[t.area||'Sin área']||0)+1;
-    calc.porTipoFalla[t.tipo_falla||'Sin tipo'] = (calc.porTipoFalla[t.tipo_falla||'Sin tipo']||0)+1;
-    calc.porActivo[t.activo||'Sin activo'] = (calc.porActivo[t.activo||'Sin activo']||0)+1;
-    const tec = t.tecnico_username || t.responsableActual || 'Sin técnico';
-    calc.porTecnico[tec] = (calc.porTecnico[tec]||0)+1;
-  });
-  reportes = {...base, ...calc};
-}
-
 async function api(url,opts={}){
   const r = await fetch(url,opts);
   const raw = await r.text();
@@ -314,7 +235,7 @@ async function boot(){try{let r=await api('/api/me');me=r.user;if(me){resetIdleT
 function login(){document.getElementById('mainHeader').style.display='none';app.style.maxWidth='none';app.style.padding='0';app.innerHTML=`<section class="login-page"><div class="login-left"><div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas"></div><h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1><p class="login-subtitle">Control general de tickets, activos, empleados, tiempos muertos y reportes internos.</p><div class="machine-strip"><div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Activos industriales</small></div><div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario y seguimiento</small></div><div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div><div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Tiempos y reportes</small></div></div></div><div class="login-right"><div class="login-card"><div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div><h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p><label>Usuario</label><input id="u" autocomplete="username" placeholder="Usuario"><label>Contraseña</label><input id="p" type="password" autocomplete="current-password" placeholder="Contraseña"><button class="btn-orange" onclick="doLogin()">Entrar al sistema</button><div class="login-footer">Interbandas · Mantenimiento IBS<br>Sin contraseña guardada en el navegador</div></div></div></section>`;setTimeout(()=>document.getElementById('u').focus(),50)}
 async function doLogin(){showLoading('Iniciando sesión...');try{const r=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u.value,password:p.value})});me=r.user;document.getElementById('p').value='';resetIdleTimer();render()}catch(e){alert('No entró: '+e.message)}finally{hideLoading()}}
 async function salir(){try{await api('/api/logout',{method:'POST'})}catch(e){}me=null;selectedAsset=null;login()}
-async function loadAll(){const [b,ts,rs]=await Promise.all([api('/api/bootstrap'),api('/api/tickets'),api('/api/reportes')]);activos=b.activos;empleados=b.empleados;tecnicos=b.tecnicos;tickets=ts;reportes=rs;prepararTicketsYTiempos()}
+async function loadAll(){const [b,ts,rs]=await Promise.all([api('/api/bootstrap'),api('/api/tickets'),api('/api/reportes')]);activos=b.activos;empleados=b.empleados;tecnicos=b.tecnicos;tickets=ts;reportes=rs}
 async function render(){if(!me)return login();showLoading('Cargando sistema...');try{document.getElementById('mainHeader').style.display='flex';document.getElementById('userLabel').textContent=`${me.name||me.username} · ${me.role||''}`;document.getElementById('topActions').innerHTML=`<button class="btn-gray" onclick="render()">Actualizar</button>${canExport()?`<button class="btn-dark" onclick="location.href='/api/export/excel'">Exportar Excel</button>`:''}<button class="btn-red" onclick="salir()">Salir</button>`;app.style.maxWidth='1350px';app.style.padding='18px';await loadAll();if(!isAdmin() && (vista==='empleados' || vista==='usuarios')) vista='panel';
 app.innerHTML=`${hero()}${me.must_change_password?changePassCard():''}${tabs()}${vista==='panel'?panel():vista==='tickets'?ticketsView():vista==='activos'?activosView():vista==='empleados'?empleadosView():vista==='reportes'?reportesView():usuariosView()}`;}finally{hideLoading()}}
 function hero(){return `<section class="hero"><h2>Panel de mantenimiento industrial</h2><p>Sucursal: <b>${esc(me.sucursal||'Todas')}</b> · Área: <b>${esc(me.area_asignada||'Todas')}</b> · Usuarios por área, empleados solo como reportantes y apoyo matriz Chihuahua.</p></section>`}
@@ -395,26 +316,27 @@ function ticketsView(){return `${crearTicketCard()}<div class="card"><h2>Buscar 
 function filterTickets(q){const nq=normalize(q);const rows=tickets.filter(t=>normalize([t.id,t.activo,t.activo_descripcion,t.area,t.estado,t.falla,t.solicitante].join(' ')).includes(nq));document.getElementById('ticketsTable').innerHTML=tablaTickets(rows)}
 function acciones(t){
   let html='';
+  const estado=String(t.estado||'');
   const tecs=tecnicosParaTicket(t);
 
-  if(t.estado==='Reportado'){
-    html+=`${puedeDesignarPersonal()?`<select id="tec_${t.id}">${tecs.map(x=>`<option value="${esc(x.username)}">${esc(x.name)} · ${esc(x.sucursal||'')} ${x.telefono?' · '+esc(x.telefono):''}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar técnico</button>`:'<span class="muted">Esperando asignación de mantenimiento</span>'}`;
+  if(estado==='Reportado'){
+    html+=`${puedeDesignarPersonal()?`<select id="tec_${t.id}">${tecs.map(x=>`<option value="${esc(x.username)}">${esc(x.name)} · ${esc(x.sucursal||'')} ${x.telefono?' · '+esc(x.telefono):''}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar y notificar</button>`:'<span class="muted">Esperando asignación de mantenimiento</span>'}`;
   }
 
-  if(t.estado==='Asignado'){
-    html+=`${puedeAceptarTicket(t)?`<button class="btn-blue" onclick="aceptar('${t.id}')">Aceptar trabajo</button>${btnAvisosAsignacion(t)}`:'<span class="muted">Trabajo asignado. Esperando que el técnico acepte.</span>'}`;
+  if(estado==='Asignado'){
+    html+=`${puedeAceptarTicket(t)?`<button class="btn-blue" onclick="aceptar('${t.id}')">Aceptar trabajo</button>${btnAvisosAsignacion(t)}`:`<span class="muted">Trabajo asignado a ${esc(t.responsableActual || t.tecnico_username || '')}. Solo el técnico asignado o gerente/MTTO puede aceptarlo.</span>`}`;
   }
 
-  if(t.estado==='En atención' || t.estado==='Devuelto'){
-    html+=`${puedeAceptarTicket(t)?`${btnAvisosAsignacion(t)}${t.estado==='Devuelto'?'<div class="notice-box"><b>Ticket devuelto por usuario.</b><br>Corrige el trabajo y finalízalo nuevamente para enviarlo otra vez a liberación.</div>':''}<textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea><textarea id="sol_${t.id}" placeholder="Solución / corrección"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Finalizar trabajo</button>`:'<span class="muted">Técnico trabajando en ello.</span>'}`;
+  if(estado==='En atención'){
+    html+=`${puedeAceptarTicket(t)?`${btnAvisosAsignacion(t)}<textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea><textarea id="sol_${t.id}" placeholder="Solución"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Finalizar trabajo</button>`:'<span class="muted">Técnico trabajando en ello.</span>'}`;
   }
 
-  if(t.estado==='Pendiente validación'){
+  if(estado==='Devuelto'){
+    html+=`${puedeAceptarTicket(t)?`${btnAvisosAsignacion(t)}<div class="notice-box"><b>Ticket devuelto por el usuario.</b><br>Corrige la falla y finaliza nuevamente.</div><textarea id="diag_${t.id}" placeholder="Diagnóstico / revisión"></textarea><textarea id="sol_${t.id}" placeholder="Solución / corrección"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Finalizar corrección</button>`:'<span class="muted">Ticket devuelto. Esperando al técnico asignado.</span>'}`;
+  }
+
+  if(estado==='Pendiente validación'){
     html+=`${btnAvisosAsignacion(t)}<button class="btn-green" onclick="liberar('${t.id}')">Liberar</button><button class="btn-red" onclick="devolver('${t.id}')">Devolver</button>`;
-  }
-
-  if(t.estado==='Liberado'){
-    html+='<span class="muted">Ticket liberado y cerrado.</span>';
   }
 
   return html||'<span class="muted">Sin acciones</span>'
@@ -470,13 +392,7 @@ function fotosHtml(arr){
   if(!fotos.length) return '';
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${fotos.map(p=>`<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" style="width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid #ddd"></a>`).join('')}</div>`;
 }
-function tablaTickets(rows){
-  if(!rows.length)return `<div class="empty">Sin tickets.</div>`;
-  return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>{
-    const tt = t.tiempos || calcTiemposTicket(t);
-    return `<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio MTTO: ${fmt(t.iniciado)}</span><br><span class="muted">Fin MTTO: ${fmt(t.terminado)}</span><br><span class="muted">Liberado: ${fmt(t.liberado)}</span></td><td><div class="time-box-mtto"><b>MTTO</b><br>${tt.mttoMin||0} min<br><span class="muted">Solo desde aceptar hasta finalizar</span></div><div class="time-box-prod"><b>Operaciones</b><br>${tt.produccionMin||0} min<br><span class="muted">Antes de aceptar + espera de liberación</span></div><div class="time-box-total"><b>Total muerto:</b> ${tt.muertoTotalMin||0} min</div><hr style="border:0;border-top:1px solid #e5e7eb"><span class="muted">Espera antes de MTTO: ${tt.esperaInicioMin||0} min</span><br><span class="muted">Espera liberación usuario: ${tt.esperaValidacionMin||0} min</span></td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}</td></tr>`;
-  }).join('')}</tbody></table>`;
-}
+function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio MTTO: ${fmt(t.iniciado)}</span><br><span class="muted">Fin MTTO: ${fmt(t.terminado)}</span><br><span class="muted">Liberado: ${fmt(t.liberado)}</span></td><td><div class="time-box-mtto"><b>MTTO</b><br>${t.tiempos.mttoMin} min<br><span class="muted">Desde que acepta hasta que finaliza</span></div><div class="time-box-prod"><b>Operaciones</b><br>${t.tiempos.produccionMin} min<br><span class="muted">Espera antes de MTTO + espera de liberación</span></div><div class="time-box-total"><b>Total muerto:</b> ${t.tiempos.muertoTotalMin} min</div><hr style="border:0;border-top:1px solid #e5e7eb"><span class="muted">Espera antes de iniciar: ${t.tiempos.esperaInicioMin||0} min</span><br><span class="muted">Espera validación/liberación: ${t.tiempos.esperaValidacionMin||0} min</span></td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}</td></tr>`).join('')}</tbody></table>`}
 function activosView(){return `<div class="card"><h2>Importar activos desde Excel</h2><p class="muted">Acepta tu formato actual: NUM ACTIVO, DESCRIPCION, AREA, TIPO, SUCURSAL, UBICACION, MARCA, MODELO, USUARIO, ESTATUS.</p>${isAdmin()?`<input type="file" id="excelActivos" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/activos','excelActivos')">Importar activos</button>`:'<p class="muted">Solo admin puede importar.</p>'}</div>${isAdmin()?`<div class="card"><h2>Agregar activo manual</h2><div class="grid4"><input id="aNum" placeholder="Número"><input id="aDesc" placeholder="Descripción"><input id="aArea" placeholder="Área"><select id="aTipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select><input id="aSuc" placeholder="Sucursal"><input id="aUbi" placeholder="Ubicación"><input id="aMarca" placeholder="Marca"><input id="aModelo" placeholder="Modelo"><input id="aUsuario" placeholder="Usuario responsable"><input id="aEstatus" placeholder="Estatus" value="VIGENTE"></div><button class="btn-orange" onclick="agregarActivo()">Guardar activo</button></div>`:''}<div class="card"><h2>Activos</h2><div class="searchbox"><input id="qActivos" oninput="filterActivos(this.value)" placeholder="Buscar por palabra clave: activo, descripción, área, tipo, sucursal, ubicación, marca, usuario, estatus"></div><div id="activosTable">${tablaActivos(activos)}</div></div>`}
 async function importar(endpoint,inputId){showLoading('Importando Excel...');try{let file=document.getElementById(inputId).files[0];if(!file)return alert('Selecciona un Excel');let fd=new FormData();fd.append('archivo',file);let r=await api(endpoint,{method:'POST',body:fd});alert(`Importado\nAgregados: ${r.agregados}\nActualizados: ${r.actualizados}\nOmitidos: ${r.omitidos}`);render()}catch(e){alert('Error: '+e.message)}finally{hideLoading()}}
 async function agregarActivo(){if(!isAdmin()) return alert('Solo administrador puede agregar activos');await api('/api/activos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numero:aNum.value,descripcion:aDesc.value,area:aArea.value,tipo:aTipo.value,sucursal:aSuc.value,ubicacion:aUbi.value,marca:aMarca.value,modelo:aModelo.value,usuario:aUsuario.value,estatus:aEstatus.value})});render()}
@@ -498,10 +414,7 @@ async function guardarEdicionUsuario(id){try{showLoading('Guardando usuario...')
 async function borrarUsuariosDemo(){if(!confirm('¿Quitar usuarios demo/prueba del listado y de la base? No se borra admin.'))return;try{showLoading('Quitando usuarios demo...');const r=await api('/api/users/cleanup-demos',{method:'POST'});alert(`Usuarios demo quitados: ${r.deleted||0}`);editingUserId=null;await render()}catch(e){alert('No se pudo limpiar demos: '+e.message)}finally{hideLoading()}}
 async function resetPass(id){const p=prompt('Nueva contraseña temporal (mínimo 6 caracteres)','Temp1234');if(!p)return;await api('/api/users/'+id+'/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});alert('Contraseña reiniciada. El usuario deberá cambiarla al entrar.');render()}
 async function desactivarUsuario(id){if(!confirm('¿Desactivar este usuario? No se borran sus registros.'))return;await api('/api/users/'+id,{method:'DELETE'});render()}
-function reportesView(){
-  const max=Math.max(reportes.mttoMin||0,reportes.produccionMin||0,1);
-  return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Total muerto = desde que se reporta la falla hasta que se libera el equipo. MTTO = desde que el técnico acepta el trabajo hasta que finaliza. Operaciones = espera antes de que MTTO acepte + espera de liberación del usuario. Si el usuario tarda en liberar, ese tiempo se carga a Operaciones, no a MTTO.</p><p><b>Tiempo muerto total:</b> ${reportes.muertoTotalMin||0} min</p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br>${reportes.mttoMin||0} min<div class="bar"><span style="width:${((reportes.mttoMin||0)/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br>${reportes.produccionMin||0} min<div class="bar"><span style="width:${((reportes.produccionMin||0)/max)*100}%"></span></div></div></div><br><div class="grid"><div><b>Espera antes de que MTTO acepte:</b><br>${reportes.esperaInicioMin||0} min</div><div><b>Espera de liberación del usuario:</b><br>${reportes.esperaValidacionMin||0} min</div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(tickets)}`;
-}
+function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Total muerto = desde que se reporta la falla hasta que se libera el equipo. MTTO = desde que el técnico acepta el trabajo hasta que finaliza. Operaciones = espera antes de que MTTO acepte + espera de liberación del usuario.</p><p><b>Tiempo muerto total:</b> ${reportes.muertoTotalMin||0} min</p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br>${reportes.mttoMin||0} min<div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br>${reportes.produccionMin||0} min<div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><div class="grid"><div><b>Espera antes de iniciar reparación:</b><br>${reportes.esperaInicioMin||0} min</div><div><b>Espera validación/liberación:</b><br>${reportes.esperaValidacionMin||0} min</div></div><br>${canExport()?`<button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button>`:'<p class="muted">Exportación disponible solo para gerente o personal autorizado.</p>'}</div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(tickets)}`}
 function simpleStats(title,obj){return `<div class="card"><h2>${title}</h2>${Object.keys(obj||{}).map(k=>`<p><b>${esc(k)}</b>: ${obj[k]}</p>`).join('')||'<p class="muted">Sin datos</p>'}</div>`}
 
 window.changePass=changePass;
