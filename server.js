@@ -69,6 +69,36 @@ function canWorkTicket(user, ticket){
   if(role === 'tecnico') return String(ticket.tecnico_username||'').toLowerCase() === String(user.username||'').toLowerCase();
   return false;
 }
+
+function canReleaseTicket(user, ticket){
+  if(!user || !ticket) return false;
+  const role = String(user.role || '').toLowerCase();
+
+  // Admin siempre puede liberar.
+  if(role === 'admin') return true;
+
+  // El técnico NO puede liberar equipo.
+  if(role === 'tecnico') return false;
+
+  // El usuario/área que reporta puede liberar.
+  // Se valida por el created_by cuando existe.
+  if(ticket.created_by && String(ticket.created_by) === String(user.id)) return true;
+
+  // Respaldo para usuarios de área/operaciones:
+  // misma sucursal y misma área del ticket.
+  const userArea = norm(user.area_asignada || '');
+  const ticketArea = norm(ticket.area || '');
+  const userSucursal = norm(user.sucursal || '');
+  const ticketSucursal = norm(ticket.sucursal || '');
+
+  if(userArea && ticketArea && userArea === ticketArea){
+    if(!ticketSucursal || !userSucursal || userSucursal === ticketSucursal) return true;
+  }
+
+  return false;
+}
+
+
 function addScopedClauses(user, params, clauses, alias=''){
   const p = alias ? alias + '.' : '';
   if(!user || isGlobalUser(user)) return;
@@ -687,14 +717,20 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
     const t = q.rows[0];
 
     if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
-    if(!t.terminado) return res.status(400).json({error:'Primero debes terminar la reparación.'});
+    if(!t.terminado) return res.status(400).json({error:'Primero mantenimiento debe terminar la reparación.'});
+    if(!canReleaseTicket(req.session.user, t)){
+      return res.status(403).json({error:'Solo el usuario/área que reportó o el administrador puede liberar este equipo.'});
+    }
 
     const liberado = new Date();
 
     const mttoSeg = Number(t.mtto_seg || secondsBetween(t.iniciado, t.terminado));
-    const esperaAntesSeg = secondsBetween(t.creado, t.iniciado);
+
+    // Producción/Operaciones = espera antes de que MTTO acepte + espera de liberación
+    const esperaInicioSeg = secondsBetween(t.creado, t.iniciado);
     const esperaLiberacionSeg = secondsBetween(t.terminado, liberado);
-    const prodSeg = esperaAntesSeg + esperaLiberacionSeg;
+    const prodSeg = esperaInicioSeg + esperaLiberacionSeg;
+
     const totalSeg = secondsBetween(t.creado, liberado);
 
     const mttoMin = Math.floor(mttoSeg / 60);
@@ -728,13 +764,30 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
     await logAction(req.session.user.id,'release_ticket',{id:req.params.id, mttoSeg, prodSeg, totalSeg});
     if(up.rows[0] && typeof notifyTicketReleased === 'function') await notifyTicketReleased(up.rows[0]);
 
-    res.json({ok:true, ticket:up.rows[0]});
+    res.json({ok:true, ticket:decorateTicket(up.rows[0])});
   }catch(err){
     console.error('Error liberando ticket:', err);
     res.status(500).json({error:err.message});
   }
 });
-app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]); await logAction(req.session.user.id,'return_ticket',{id:req.params.id}); res.json({ok:true}); });
+app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{
+  try{
+    const q = await pool.query('select * from tickets where id=$1',[req.params.id]);
+    const t = q.rows[0];
+
+    if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
+    if(!canReleaseTicket(req.session.user, t)){
+      return res.status(403).json({error:'Solo el usuario/área que reportó o el administrador puede devolver este equipo.'});
+    }
+
+    await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]);
+    await logAction(req.session.user.id,'return_ticket',{id:req.params.id});
+    res.json({ok:true});
+  }catch(err){
+    console.error('Error devolviendo ticket:', err);
+    res.status(500).json({error:err.message});
+  }
+});
 
 app.get('/api/reportes', requireLogin, async (req,res)=>{
   const params=[]; const clauses=[];
