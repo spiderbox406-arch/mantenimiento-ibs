@@ -162,7 +162,6 @@ function btnAvisosAsignacion(t){
   if(!t || !t.tecnico_username) return '';
   return `<div style="margin-top:8px">
     <button class="btn-green" type="button" onclick='abrirAvisoTecnico(${JSON.stringify(t)})'>Avisar técnico</button>
-    <button class="btn-blue" type="button" onclick='abrirConfirmacionUsuario(${JSON.stringify(t)})'>Confirmar usuario</button>
   </div>`;
 }
 
@@ -170,34 +169,11 @@ function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&l
 function fmt(d){return d?new Date(d).toLocaleString():'-'}
 function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replaceAll(' ','')}
 function isAdmin(){return me && me.role==='admin'}
-function rolActual(){return String(me?.role||'').toLowerCase()}
-function canExport(){return me && (rolActual()==='admin' || rolActual()==='gerente' || me.can_export===true)}
-function isGerencia(){return me && ['admin','gerente','mantenimiento'].includes(rolActual())}
-function esTecnico(){return me && rolActual()==='tecnico'}
-function puedeDesignarPersonal(){return me && ['admin','gerente','mantenimiento'].includes(rolActual())}
-function camposTecnicoTicket(t){
-  return [
-    t.tecnico_username,
-    t.tecnico,
-    t.tecnico_asignado,
-    t.responsable,
-    t.responsableActual,
-    t.asignado_a,
-    t.asignado
-  ].filter(Boolean).map(x=>String(x).toLowerCase().trim());
-}
-function soyTecnicoAsignado(t){
-  if(!me) return false;
-  const usuario=String(me.username||'').toLowerCase().trim();
-  const nombre=String(me.name||'').toLowerCase().trim();
-  const campos=camposTecnicoTicket(t);
-  return campos.some(x=>x===usuario || x===nombre || x.includes(usuario) || (nombre && x.includes(nombre)));
-}
-function puedeAceptarTicket(t){
-  if(!me) return false;
-  if(isGerencia()) return true;
-  return esTecnico() && soyTecnicoAsignado(t);
-}
+function canExport(){return me && (me.role==='admin' || me.can_export===true)}
+function isGerencia(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
+function esTecnico(){return me && String(me.role||'').toLowerCase()==='tecnico'}
+function puedeGestionarMtto(){return me && ['admin','gerente','mantenimiento','tecnico'].includes(String(me.role||'').toLowerCase())}
+function puedeAceptarTicket(t){return puedeGestionarMtto() && (!t.tecnico_username || String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase() || isGerencia())}
 function sameKey(a,b){return normalize(a)===normalize(b)}
 function esMatriz(s){return sameKey(s,'CHIHUAHUA')}
 function tecnicosParaTicket(t){return tecnicos.filter(x=>sameKey(x.sucursal,t.sucursal)||esMatriz(x.sucursal)||!t.sucursal)}
@@ -314,31 +290,35 @@ async function crearTicket(){
 }
 function ticketsView(){return `${crearTicketCard()}<div class="card"><h2>Buscar tickets</h2><div class="searchbox"><input id="qTickets" oninput="filterTickets(this.value)" placeholder="Buscar por ticket, activo, estado, área, falla o solicitante"></div><div id="ticketsTable">${tablaTickets(tickets)}</div></div>`}
 function filterTickets(q){const nq=normalize(q);const rows=tickets.filter(t=>normalize([t.id,t.activo,t.activo_descripcion,t.area,t.estado,t.falla,t.solicitante].join(' ')).includes(nq));document.getElementById('ticketsTable').innerHTML=tablaTickets(rows)}
+
+function puedeLiberarTicket(t){
+  if(!me || !t) return false;
+  const rol=String(me.role||'').toLowerCase();
+
+  if(rol==='admin') return true;
+  if(rol==='tecnico') return false;
+
+  const mismaArea = normalize(me.area_asignada||'') && normalize(t.area||'') && normalize(me.area_asignada||'')===normalize(t.area||'');
+  const mismaSucursal = !t.sucursal || !me.sucursal || normalize(me.sucursal||'')===normalize(t.sucursal||'');
+
+  return mismaArea && mismaSucursal;
+}
+
 function acciones(t){
   let html='';
-  const estado=String(t.estado||'');
   const tecs=tecnicosParaTicket(t);
-
-  if(estado==='Reportado'){
-    html+=`${puedeDesignarPersonal()?`<select id="tec_${t.id}">${tecs.map(x=>`<option value="${esc(x.username)}">${esc(x.name)} · ${esc(x.sucursal||'')} ${x.telefono?' · '+esc(x.telefono):''}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar y notificar</button>`:'<span class="muted">Esperando asignación de mantenimiento</span>'}`;
+  if(t.estado==='Reportado'){
+    html+=`${puedeGestionarMtto()?`<select id="tec_${t.id}">${tecs.map(x=>`<option value="${esc(x.username)}">${esc(x.name)} · ${esc(x.sucursal||'')} ${x.telefono?' · '+esc(x.telefono):''}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar y notificar</button>`:'<span class="muted">Esperando asignación de mantenimiento</span>'}`;
   }
-
-  if(estado==='Asignado'){
-    html+=`${puedeAceptarTicket(t)?`<button class="btn-blue" onclick="aceptar('${t.id}')">Aceptar trabajo</button>${btnAvisosAsignacion(t)}`:`<span class="muted">Trabajo asignado a ${esc(t.responsableActual || t.tecnico_username || '')}. Solo el técnico asignado o gerente/MTTO puede aceptarlo.</span>`}`;
+  if(t.estado==='Asignado'){
+    html+=`${puedeAceptarTicket(t)?`<button class="btn-blue" onclick="aceptar('${t.id}')">Aceptar trabajo</button>${btnAvisosAsignacion(t)}`:'<span class="muted">Trabajo asignado. Esperando que el técnico acepte.</span>'}`;
   }
-
-  if(estado==='En atención'){
+  if(t.estado==='En atención'){
     html+=`${puedeAceptarTicket(t)?`${btnAvisosAsignacion(t)}<textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea><textarea id="sol_${t.id}" placeholder="Solución"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Finalizar trabajo</button>`:'<span class="muted">Técnico trabajando en ello.</span>'}`;
   }
-
-  if(estado==='Devuelto'){
-    html+=`${puedeAceptarTicket(t)?`${btnAvisosAsignacion(t)}<div class="notice-box"><b>Ticket devuelto por el usuario.</b><br>Corrige la falla y finaliza nuevamente.</div><textarea id="diag_${t.id}" placeholder="Diagnóstico / revisión"></textarea><textarea id="sol_${t.id}" placeholder="Solución / corrección"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Finalizar corrección</button>`:'<span class="muted">Ticket devuelto. Esperando al técnico asignado.</span>'}`;
-  }
-
-  if(estado==='Pendiente validación'){
+  if(t.estado==='Pendiente validación'){
     html+=`${btnAvisosAsignacion(t)}<button class="btn-green" onclick="liberar('${t.id}')">Liberar</button><button class="btn-red" onclick="devolver('${t.id}')">Devolver</button>`;
   }
-
   return html||'<span class="muted">Sin acciones</span>'
 }
 async function asignar(id){
@@ -414,7 +394,7 @@ async function guardarEdicionUsuario(id){try{showLoading('Guardando usuario...')
 async function borrarUsuariosDemo(){if(!confirm('¿Quitar usuarios demo/prueba del listado y de la base? No se borra admin.'))return;try{showLoading('Quitando usuarios demo...');const r=await api('/api/users/cleanup-demos',{method:'POST'});alert(`Usuarios demo quitados: ${r.deleted||0}`);editingUserId=null;await render()}catch(e){alert('No se pudo limpiar demos: '+e.message)}finally{hideLoading()}}
 async function resetPass(id){const p=prompt('Nueva contraseña temporal (mínimo 6 caracteres)','Temp1234');if(!p)return;await api('/api/users/'+id+'/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});alert('Contraseña reiniciada. El usuario deberá cambiarla al entrar.');render()}
 async function desactivarUsuario(id){if(!confirm('¿Desactivar este usuario? No se borran sus registros.'))return;await api('/api/users/'+id,{method:'DELETE'});render()}
-function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Total muerto = desde que se reporta la falla hasta que se libera el equipo. MTTO = desde que el técnico acepta el trabajo hasta que finaliza. Operaciones = espera antes de que MTTO acepte + espera de liberación del usuario.</p><p><b>Tiempo muerto total:</b> ${reportes.muertoTotalMin||0} min</p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br>${reportes.mttoMin||0} min<div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br>${reportes.produccionMin||0} min<div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><div class="grid"><div><b>Espera antes de iniciar reparación:</b><br>${reportes.esperaInicioMin||0} min</div><div><b>Espera validación/liberación:</b><br>${reportes.esperaValidacionMin||0} min</div></div><br>${canExport()?`<button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button>`:'<p class="muted">Exportación disponible solo para gerente o personal autorizado.</p>'}</div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(tickets)}`}
+function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Total muerto = desde que se reporta la falla hasta que se libera el equipo. MTTO = desde que el técnico acepta el trabajo hasta que finaliza. Operaciones = espera antes de que MTTO acepte + espera de liberación del usuario.</p><p><b>Tiempo muerto total:</b> ${reportes.muertoTotalMin||0} min</p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br>${reportes.mttoMin||0} min<div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br>${reportes.produccionMin||0} min<div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><div class="grid"><div><b>Espera antes de iniciar reparación:</b><br>${reportes.esperaInicioMin||0} min</div><div><b>Espera validación/liberación:</b><br>${reportes.esperaValidacionMin||0} min</div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(tickets)}`}
 function simpleStats(title,obj){return `<div class="card"><h2>${title}</h2>${Object.keys(obj||{}).map(k=>`<p><b>${esc(k)}</b>: ${obj[k]}</p>`).join('')||'<p class="muted">Sin datos</p>'}</div>`}
 
 window.changePass=changePass;
@@ -425,6 +405,7 @@ window.aceptar=aceptar;
 window.terminar=terminar;
 window.liberar=liberar;
 window.devolver=devolver;
+window.puedeLiberarTicket=puedeLiberarTicket;
 window.render=render;
 window.salir=salir;
 window.doLogin=doLogin;
