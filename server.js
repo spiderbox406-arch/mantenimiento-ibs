@@ -60,7 +60,15 @@ const MATRIZ_SUCURSAL = 'CHIHUAHUA';
 function sameKey(a,b){ return norm(a) === norm(b); }
 function isGlobalRole(role){ return ['admin','gerente','mantenimiento'].includes(String(role||'').toLowerCase()); }
 function isGlobalUser(user){ return Boolean(user && isGlobalRole(user.role)); }
-function isTecnicoRole(role){ return ['tecnico','mantenimiento','admin'].includes(String(role||'').toLowerCase()); }
+function isTecnicoRole(role){ return ['tecnico','mantenimiento','admin','gerente'].includes(String(role||'').toLowerCase()); }
+function canManageTickets(user){ return Boolean(user && ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase())); }
+function canWorkTicket(user, ticket){
+  if(!user || !ticket) return false;
+  const role = String(user.role||'').toLowerCase();
+  if(['admin','gerente','mantenimiento'].includes(role)) return true;
+  if(role === 'tecnico') return String(ticket.tecnico_username||'').toLowerCase() === String(user.username||'').toLowerCase();
+  return false;
+}
 function addScopedClauses(user, params, clauses, alias=''){
   const p = alias ? alias + '.' : '';
   if(!user || isGlobalUser(user)) return;
@@ -69,13 +77,13 @@ function addScopedClauses(user, params, clauses, alias=''){
 }
 function buildWhere(clauses){ return clauses.length ? ' where ' + clauses.join(' and ') : ''; }
 async function getUserByUsername(username){
-  const r = await pool.query('select id, name, username, role, status, sucursal, area_asignada, telefono, correo from users where lower(username)=lower($1) limit 1', [clean(username)]);
+  const r = await pool.query('select id, name, username, role, status, can_export, sucursal, area_asignada, telefono, correo from users where lower(username)=lower($1) limit 1', [clean(username)]);
   return r.rows[0] || null;
 }
 function requireLogin(req,res,next){ if(!req.session.user) return res.status(401).json({error:'Sesión vencida. Inicia sesión otra vez.'}); next(); }
 function requireAdmin(req,res,next){ if(!req.session.user || req.session.user.role !== 'admin') return res.status(403).json({error:'Solo administrador.'}); next(); }
 function canExportExcel(req){
-  return Boolean(req.session.user && (req.session.user.role === 'admin' || req.session.user.can_export === true));
+  return Boolean(req.session.user && (['admin','gerente'].includes(String(req.session.user.role||'').toLowerCase()) || req.session.user.can_export === true));
 }
 function requireCanExport(req,res,next){
   if(!canExportExcel(req)) return res.status(403).json({error:'No tienes permiso para exportar Excel.'});
@@ -342,7 +350,7 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
 
   const [a,t] = await Promise.all([
     pool.query(`select * from activos ${assetsWhere} order by sucursal, area, numero limit 5000`, assetParams),
-    pool.query("select id, name, username, role, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by sucursal, name")
+    pool.query("select id, name, username, role, can_export, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin','gerente') order by sucursal, name")
   ]);
 
   let empleados = [];
@@ -417,14 +425,31 @@ app.get('/api/users', requireAdmin, async (req,res)=>{
   res.json(r.rows);
 });
 app.post('/api/users', requireAdmin, async (req,res)=>{
-  const u=req.body; const pass=String(u.password || 'Temp1234');
-  if(!clean(u.username) || !clean(u.name)) return res.status(400).json({error:'Usuario y nombre son obligatorios.'});
-  const hash=await bcrypt.hash(pass,12);
-  const r=await pool.query(`insert into users(numero_empleado,name,username,password_hash,role,status,must_change_password,area_asignada,sucursal,telefono,correo)
-    values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9) returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo`,
-    [clean(u.numero_empleado),clean(u.name),clean(u.username),hash,clean(u.role||'operaciones'),clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo)]);
-  await logAction(req.session.user.id, 'create_user', {username:u.username});
-  res.json(r.rows[0]);
+  try{
+    const u=req.body;
+    const pass=String(u.password || 'Temp1234');
+    if(!clean(u.username) || !clean(u.name)) return res.status(400).json({error:'Usuario y nombre son obligatorios.'});
+    if(pass.length < 6) return res.status(400).json({error:'La contraseña debe tener mínimo 6 caracteres.'});
+
+    const role = clean(u.role || 'operaciones').toLowerCase();
+    const canExport = Boolean(u.can_export) || role === 'gerente' || role === 'admin';
+    const hash=await bcrypt.hash(pass,12);
+
+    const r=await pool.query(`
+      insert into users(
+        numero_empleado,name,username,password_hash,role,status,must_change_password,
+        area_asignada,sucursal,telefono,correo,can_export
+      ) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9,$10)
+      returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo
+    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo),canExport]);
+
+    await logAction(req.session.user.id, 'create_user', {username:u.username});
+    res.json(r.rows[0]);
+  }catch(err){
+    console.error('Error creando usuario:', err);
+    if(err.code === '23505') return res.status(400).json({error:'Ese usuario ya existe. Usa otro nombre de usuario.'});
+    res.status(500).json({error:err.message});
+  }
 });
 app.post('/api/users/cleanup-demos', requireAdmin, async (req,res)=>{
   const r = await pool.query(
@@ -470,7 +495,7 @@ app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async 
       actualizados++;
     } else {
       const pass=String(row.password ?? row.PASSWORD ?? 'Temp1234'); const hash=await bcrypt.hash(pass,12);
-      await pool.query(`insert into users(numero_empleado,name,username,password_hash,role,status,must_change_password,sucursal,area_asignada,telefono,correo) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9)`, [clean(row.numeroEmpleado ?? row.NUMERO_EMPLEADO ?? row['NUM EMPLEADO']),name,username,hash,role,clean(row.sucursal ?? row.SUCURSAL),clean(row.areaAsignada ?? row.AREA ?? row.area),clean(row.telefono ?? row.TELEFONO),clean(row.correo ?? row.CORREO)]);
+      await pool.query(`insert into users(numero_empleado,name,username,password_hash,role,status,must_change_password,sucursal,area_asignada,telefono,correo,can_export) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9,$10)`, [clean(row.numeroEmpleado ?? row.NUMERO_EMPLEADO ?? row['NUM EMPLEADO']),name,username,hash,role,clean(row.sucursal ?? row.SUCURSAL),clean(row.areaAsignada ?? row.AREA ?? row.area),clean(row.telefono ?? row.TELEFONO),clean(row.correo ?? row.CORREO), role === 'gerente' || role === 'admin']);
       agregados++;
     }
   }
@@ -550,7 +575,7 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
 });
 app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
   try{
-    if(!isGlobalUser(req.session.user)) return res.status(403).json({error:'Solo gerente, mantenimiento o admin puede asignar tickets.'});
+    if(!canManageTickets(req.session.user)) return res.status(403).json({error:'Solo gerente, mantenimiento o admin puede asignar tickets.'});
     const tecnico = await getUserByUsername(req.body.tecnico_username);
     if(!tecnico || tecnico.status !== 'activo' || !isTecnicoRole(tecnico.role)) return res.status(400).json({error:'Técnico no válido o inactivo.'});
 
@@ -577,13 +602,17 @@ app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
 });
 app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{
   try{
+    const q = await pool.query('select * from tickets where id=$1',[req.params.id]);
+    const t = q.rows[0];
+    if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
+    if(!canWorkTicket(req.session.user, t)) return res.status(403).json({error:'Solo el técnico asignado, gerente, mantenimiento o admin puede aceptar este trabajo.'});
+
     const r = await pool.query(
       "update tickets set estado='En atención', iniciado=coalesce(iniciado,now()) where id=$1 returning *",
       [req.params.id]
     );
-    if(!r.rows[0]) return res.status(404).json({error:'Ticket no encontrado.'});
     await logAction(req.session.user.id,'start_ticket',{id:req.params.id});
-    res.json({ok:true, ticket:r.rows[0]});
+    res.json({ok:true, ticket:decorateTicket(r.rows[0])});
   }catch(err){
     console.error('Error iniciando ticket:', err);
     res.status(500).json({error:err.message});
@@ -595,6 +624,7 @@ app.post('/api/tickets/:id/terminar', requireLogin, uploadImages.array('fotos_tr
     const t = q.rows[0];
 
     if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
+    if(!canWorkTicket(req.session.user, t)) return res.status(403).json({error:'Solo el técnico asignado, gerente, mantenimiento o admin puede finalizar este trabajo.'});
     if(!t.iniciado) return res.status(400).json({error:'Primero debes iniciar la atención del ticket.'});
 
     const fotosTrabajo = (req.files || []).map(f => '/uploads/' + f.filename);
@@ -645,7 +675,9 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
     const liberado = new Date();
 
     const mttoSeg = Number(t.mtto_seg || secondsBetween(t.iniciado, t.terminado));
-    const prodSeg = secondsBetween(t.terminado, liberado);
+    const esperaAntesSeg = secondsBetween(t.creado, t.iniciado);
+    const esperaLiberacionSeg = secondsBetween(t.terminado, liberado);
+    const prodSeg = esperaAntesSeg + esperaLiberacionSeg;
     const totalSeg = secondsBetween(t.creado, liberado);
 
     const mttoMin = Math.floor(mttoSeg / 60);
