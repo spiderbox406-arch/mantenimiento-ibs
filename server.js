@@ -548,10 +548,49 @@ app.post('/api/users/:id/reset-password', requireAdmin, async (req,res)=>{
   res.json({ok:true});
 });
 app.delete('/api/users/:id', requireAdmin, async (req,res)=>{
-  if(String(req.params.id) === String(req.session.user.id)) return res.status(400).json({error:'No puedes desactivarte a ti mismo.'});
-  await pool.query("update users set status='inactivo', updated_at=now() where id=$1", [req.params.id]);
-  await logAction(req.session.user.id, 'deactivate_user', {id:req.params.id});
-  res.json({ok:true});
+  const client = await pool.connect();
+  try{
+    const id = req.params.id;
+
+    if(String(id) === String(req.session.user.id)){
+      return res.status(400).json({error:'No puedes eliminar tu propio usuario admin mientras estás conectado.'});
+    }
+
+    await client.query('BEGIN');
+
+    const userResult = await client.query('select id, username from users where id=$1 limit 1', [id]);
+    const userToDelete = userResult.rows[0];
+
+    if(!userToDelete){
+      await client.query('ROLLBACK');
+      return res.status(404).json({error:'Usuario no encontrado.'});
+    }
+
+    // Limpiar relaciones para que PostgreSQL permita borrar el usuario.
+    // Conserva los tickets, pero les quita la referencia al usuario eliminado.
+    await client.query('update tickets set tecnico_username=null where lower(coalesce(tecnico_username, \'\'))=lower($1)', [userToDelete.username]);
+    await client.query('update tickets set created_by=null where created_by=$1', [id]);
+
+    // Limpiar logs relacionados si existe relación FK.
+    await client.query('update user_activity_log set user_id=null where user_id=$1', [id]);
+
+    const deleted = await client.query('delete from users where id=$1 returning id, username', [id]);
+
+    await client.query('COMMIT');
+
+    await logAction(req.session.user.id, 'delete_user', {
+      deleted_id:id,
+      deleted_username:userToDelete.username
+    });
+
+    res.json({ok:true, deleted:deleted.rows[0]});
+  }catch(err){
+    try{ await client.query('ROLLBACK'); }catch(e){}
+    console.error('Error eliminando usuario:', err);
+    res.status(500).json({error:err.message});
+  }finally{
+    client.release();
+  }
 });
 app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async (req,res)=>{
   if(!req.file) return res.status(400).json({error:'Sube un archivo Excel.'});
