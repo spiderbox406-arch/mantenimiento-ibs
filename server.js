@@ -395,9 +395,10 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
   addScopedClauses(user, assetParams, assetClauses);
   const assetsWhere = buildWhere(assetClauses);
 
-  const [a,t] = await Promise.all([
+  const [a,t,g] = await Promise.all([
     pool.query(`select * from activos ${assetsWhere} order by sucursal, area, numero limit 5000`, assetParams),
-    pool.query("select id, name, username, role, can_export, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin','gerente') order by sucursal, name")
+    pool.query("select id, name, username, role, can_export, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by sucursal, name"),
+    pool.query("select id, name, username, role, can_export, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('gerente','mantenimiento','admin') order by case when role='gerente' then 0 when role='mantenimiento' then 1 else 2 end, sucursal, name")
   ]);
 
   let empleados = [];
@@ -406,7 +407,7 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
     empleados = e.rows;
   }
 
-  res.json({activos:a.rows, empleados, tecnicos:t.rows});
+  res.json({activos:a.rows, empleados, tecnicos:t.rows, gerentes:g.rows});
 });
 
 app.get('/api/activos', requireLogin, async (req,res)=>{
@@ -461,6 +462,31 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
   }
   await logAction(req.session.user.id, 'import_assets', {agregados,actualizados,omitidos});
   res.json({agregados,actualizados,omitidos,total:rows.length});
+});
+
+
+app.post('/api/admin/limpiar-inicio', requireAdmin, async (req,res)=>{
+  try{
+    const ticketsBorrados = await pool.query('delete from tickets returning id');
+
+    const usuariosBorrados = await pool.query(
+      "delete from users where lower(username) <> 'admin' returning id, username"
+    );
+
+    await logAction(req.session.user.id, 'clean_start', {
+      tickets:ticketsBorrados.rowCount,
+      usuarios:usuariosBorrados.rowCount
+    });
+
+    res.json({
+      ok:true,
+      tickets_borrados:ticketsBorrados.rowCount,
+      usuarios_borrados:usuariosBorrados.rowCount
+    });
+  }catch(err){
+    console.error('Error limpiando inicio:', err);
+    res.status(500).json({error:err.message});
+  }
 });
 
 app.get('/api/users', requireAdmin, async (req,res)=>{
