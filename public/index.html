@@ -478,6 +478,11 @@ async function limpiarInicio(){
 }
 
 async function resetPass(id){const p=prompt('Nueva contraseña temporal (mínimo 6 caracteres)','Temp1234');if(!p)return;await api('/api/users/'+id+'/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});alert('Contraseña reiniciada. El usuario deberá cambiarla al entrar.');render()}
+
+async function desactivarUsuario(id){
+  return eliminarUsuario(id);
+}
+
 async function eliminarUsuario(id){if(!confirm('¿Eliminar este usuario? No se borran sus registros.'))return;await api('/api/users/'+id,{method:'DELETE'});render()}
 function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Total muerto = desde que se reporta la falla hasta que se libera el equipo. MTTO = desde que el técnico acepta el trabajo hasta que finaliza. Operaciones = espera antes de que MTTO acepte + espera de liberación del usuario.</p><p><b>Tiempo muerto total:</b> ${reportes.muertoTotalMin||0} min</p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br>${reportes.mttoMin||0} min<div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br>${reportes.produccionMin||0} min<div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><div class="grid"><div><b>Espera antes de iniciar reparación:</b><br>${reportes.esperaInicioMin||0} min</div><div><b>Espera validación/liberación:</b><br>${reportes.esperaValidacionMin||0} min</div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(tickets)}`}
 function simpleStats(title,obj){return `<div class="card"><h2>${title}</h2>${Object.keys(obj||{}).map(k=>`<p><b>${esc(k)}</b>: ${obj[k]}</p>`).join('')||'<p class="muted">Sin datos</p>'}</div>`}
@@ -507,6 +512,7 @@ window.limpiarInicio=limpiarInicio;
 window.editarUsuario=editarUsuario;
 window.resetPass=resetPass;
 window.desactivarUsuario=desactivarUsuario;
+window.eliminarUsuario=eliminarUsuario;
 window.abrirAvisoTecnico=abrirAvisoTecnico;
 window.abrirConfirmacionUsuario=abrirConfirmacionUsuario;
 window.cerrarModalAsignacion=cerrarModalAsignacion;
