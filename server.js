@@ -75,6 +75,23 @@ function addScopedClauses(user, params, clauses, alias=''){
   if(clean(user.sucursal)){ params.push(norm(user.sucursal)); clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`); }
   if(clean(user.area_asignada)){ params.push(norm(user.area_asignada)); clauses.push(`upper(coalesce(${p}area,'')) = $${params.length}`); }
 }
+
+function addTicketVisibilityClauses(user, params, clauses, alias=''){
+  const p = alias ? alias + '.' : '';
+  const role = String(user?.role || '').toLowerCase();
+
+  // El técnico debe ver SOLO los tickets asignados a su usuario,
+  // sin depender de que coincidan sucursal o área.
+  if(role === 'tecnico'){
+    params.push(String(user.username || '').toLowerCase());
+    clauses.push(`lower(coalesce(${p}tecnico_username,'')) = $${params.length}`);
+    return;
+  }
+
+  // Gerente / mantenimiento / admin conservan la vista global permitida.
+  addScopedClauses(user, params, clauses, alias);
+}
+
 function buildWhere(clauses){ return clauses.length ? ' where ' + clauses.join(' and ') : ''; }
 async function getUserByUsername(username){
   const r = await pool.query('select id, name, username, role, status, can_export, sucursal, area_asignada, telefono, correo from users where lower(username)=lower($1) limit 1', [clean(username)]);
@@ -506,7 +523,7 @@ app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async 
 app.get('/api/tickets', requireLogin, async (req,res)=>{
   const q=norm(req.query.q || '');
   const params=[]; const clauses=[];
-  addScopedClauses(req.session.user, params, clauses);
+  addTicketVisibilityClauses(req.session.user, params, clauses);
   if(q){
     params.push('%'+q+'%');
     clauses.push(`upper(coalesce(id::text,'')||' '||coalesce(activo,'')||' '||coalesce(activo_descripcion,'')||' '||coalesce(area,'')||' '||coalesce(sucursal,'')||' '||coalesce(estado,'')||' '||coalesce(falla,'')||' '||coalesce(solicitante,'')) like $${params.length}`);
@@ -721,11 +738,15 @@ app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{ await poo
 
 app.get('/api/reportes', requireLogin, async (req,res)=>{
   const params=[]; const clauses=[];
-  addScopedClauses(req.session.user, params, clauses);
+  addTicketVisibilityClauses(req.session.user, params, clauses);
   const where = buildWhere(clauses);
+  const assetParams=[]; const assetClauses=[];
+  addScopedClauses(req.session.user, assetParams, assetClauses);
+  const assetWhere = buildWhere(assetClauses);
+
   const [allTickets,act,emp] = await Promise.all([
     pool.query(`select * from tickets ${where}`, params),
-    pool.query(isGlobalUser(req.session.user) ? 'select count(*)::int n from activos' : `select count(*)::int n from activos ${where}`, params),
+    pool.query(isGlobalUser(req.session.user) ? 'select count(*)::int n from activos' : `select count(*)::int n from activos ${assetWhere}`, assetParams),
     pool.query('select count(*)::int n from users')
   ]);
   let mttoMin=0, produccionMin=0, muertoTotalMin=0, esperaInicioMin=0, esperaValidacionMin=0;
@@ -745,8 +766,16 @@ app.get('/api/reportes', requireLogin, async (req,res)=>{
   res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado, porArea, porTipoFalla, porSucursal, porActivo, porTecnico });
 });
 app.get('/api/export/excel', requireCanExport, async (req,res)=>{
-  const params=[]; const clauses=[]; addScopedClauses(req.session.user, params, clauses); const where = buildWhere(clauses);
-  const [tickets, activos, users] = await Promise.all([pool.query(`select * from tickets ${where} order by creado desc`, params),pool.query(isGlobalUser(req.session.user) ? 'select * from activos order by numero' : `select * from activos ${where} order by numero`, params),pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')]);
+  const params=[]; const clauses=[]; addTicketVisibilityClauses(req.session.user, params, clauses); const where = buildWhere(clauses);
+  const assetParams=[]; const assetClauses=[];
+  addScopedClauses(req.session.user, assetParams, assetClauses);
+  const assetWhere = buildWhere(assetClauses);
+
+  const [tickets, activos, users] = await Promise.all([
+    pool.query(`select * from tickets ${where} order by creado desc`, params),
+    pool.query(isGlobalUser(req.session.user) ? 'select * from activos order by numero' : `select * from activos ${assetWhere} order by numero`, assetParams),
+    pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')
+  ]);
   const wb=XLSX.utils.book_new();
   const ticketRows = tickets.rows.map(t => {
     const tiempos = calcTicketTimes(t);
