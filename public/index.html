@@ -288,32 +288,56 @@ async function crearTicket(){
 }
 function ticketsView(){return `${crearTicketCard()}<div class="card"><h2>Buscar tickets</h2><div class="searchbox"><input id="qTickets" oninput="filterTickets(this.value)" placeholder="Buscar por ticket, activo, estado, área, falla o solicitante"></div><div id="ticketsTable">${tablaTickets(tickets)}</div></div>`}
 function filterTickets(q){const nq=normalize(q);const rows=tickets.filter(t=>normalize([t.id,t.activo,t.activo_descripcion,t.area,t.estado,t.falla,t.solicitante].join(' ')).includes(nq));document.getElementById('ticketsTable').innerHTML=tablaTickets(rows)}
-function acciones(t){let html='';const tecs=tecnicosParaTicket(t);if(t.estado==='Reportado')html+=`${isGerencia()?`<select id="tec_${t.id}">${tecs.map(x=>`<option value="${esc(x.username)}">${esc(x.name)} · ${esc(x.sucursal||'')} ${x.telefono?' · '+esc(x.telefono):''}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar y notificar</button>`:'<span class="muted">Esperando asignación de mantenimiento</span>'}`;if(t.estado==='Asignado')html+=`<button class="btn-blue" onclick="iniciar('${t.id}')">Iniciar</button>${btnAvisosAsignacion(t)}`;if(t.estado==='En atención')html+=`${btnAvisosAsignacion(t)}<textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea><textarea id="sol_${t.id}" placeholder="Solución"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Terminar reparación</button>`;if(t.estado==='Pendiente validación')html+=`${btnAvisosAsignacion(t)}<button class="btn-green" onclick="liberar('${t.id}')">Liberar</button><button class="btn-red" onclick="devolver('${t.id}')">Devolver</button>`;return html||'<span class="muted">Sin acciones</span>'}
-async function asignar(id){
-  showLoading('Asignando ticket...');
+function tipoFallaOptions(selected){
+  const tipos=['Mecánica','Eléctrica','Neumática','Hidráulica','Programación','Sensor','Motor','Banda','Rodamiento','Ajuste','Operador','Otro'];
+  const actual=String(selected||'');
+  return tipos.map(x=>`<option value="${esc(x)}" ${x===actual?'selected':''}>${esc(x)}</option>`).join('');
+}
+function acciones(t){
+  let html='';
+  const tecs=tecnicosParaTicket(t);
+
+  if(t.estado==='Reportado')
+    html+=`${isGerencia()?`<select id="tec_${t.id}">${tecs.map(x=>`<option value="${esc(x.username)}">${esc(x.name)} · ${esc(x.sucursal||'')} ${x.telefono?' · '+esc(x.telefono):''}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar y notificar</button>`:'<span class="muted">Esperando asignación de mantenimiento</span>'}`;
+
+  if(t.estado==='Asignado')
+    html+=`<button class="btn-blue" onclick="aceptar('${t.id}')">Aceptar trabajo</button>${btnAvisosAsignacion(t)}<div class="muted" style="margin-top:6px">Al aceptar inicia el tiempo real de MTTO.</div>`;
+
+  if(t.estado==='En atención')
+    html+=`${btnAvisosAsignacion(t)}
+      <label>Tipo de falla confirmada por mantenimiento</label>
+      <select id="tipoFallaAtendida_${t.id}">${tipoFallaOptions(t.tipo_falla)}</select>
+      <textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea>
+      <textarea id="sol_${t.id}" placeholder="Solución"></textarea>
+      <label>Fotos del trabajo realizado</label>
+      <input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple>
+      <button class="btn-green" onclick="terminar('${t.id}')">Finalizar trabajo</button>
+      <div class="muted" style="margin-top:6px">Al finalizar se detiene el tiempo de MTTO y se manda a liberación del usuario.</div>`;
+
+  if(t.estado==='Pendiente validación')
+    html+=`${btnAvisosAsignacion(t)}<button class="btn-green" onclick="liberar('${t.id}')">Liberar</button><button class="btn-red" onclick="devolver('${t.id}')">Devolver</button>`;
+
+  return html||'<span class="muted">Sin acciones</span>';
+}
+async function aceptar(id){
+  showLoading('Aceptando trabajo...');
   try{
-    const r = await api(`/api/tickets/${id}/asignar`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({tecnico_username:val('tec_'+id)})
-    });
+    await api(`/api/tickets/${id}/iniciar`,{method:'POST'});
     await render();
-    if(r && r.ticket) pantallaMensajesAsignacion(r.ticket);
-  }
-  catch(e){alert(e.message)}
-  finally{hideLoading()}
+  }catch(e){alert(e.message)}finally{hideLoading()}
 }
 async function iniciar(id){
-  showLoading('Iniciando atención...');
-  try{await api(`/api/tickets/${id}/iniciar`,{method:'POST'});await render();}
-  catch(e){alert(e.message)}finally{hideLoading()}
+  // Se conserva esta función para no romper nada que todavía la llame.
+  // Ahora el flujo correcto usa aceptar(), pero ambos apuntan al mismo endpoint.
+  return aceptar(id);
 }
 async function terminar(id){
-  showLoading('Guardando trabajo realizado...');
+  showLoading('Finalizando trabajo de mantenimiento...');
   try{
     const fd=new FormData();
     fd.append('diagnostico',val('diag_'+id));
     fd.append('solucion',val('sol_'+id));
+    fd.append('tipo_falla',val('tipoFallaAtendida_'+id));
     filesOf('fotosTrabajo_'+id).forEach(f=>fd.append('fotos_trabajo',f));
     await api(`/api/tickets/${id}/terminar`,{method:'POST',body:fd});
     await render();
@@ -335,7 +359,22 @@ function fotosHtml(arr){
   if(!fotos.length) return '';
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${fotos.map(p=>`<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" style="width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid #ddd"></a>`).join('')}</div>`;
 }
-function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio MTTO: ${fmt(t.iniciado)}</span><br><span class="muted">Fin MTTO: ${fmt(t.terminado)}</span><br><span class="muted">Liberado: ${fmt(t.liberado)}</span></td><td><b>Total muerto:</b> ${t.tiempos.muertoTotalMin} min<br><b>MTTO real:</b> ${t.tiempos.mttoMin} min<br><b>Producción/espera:</b> ${t.tiempos.produccionMin} min<hr style="border:0;border-top:1px solid #e5e7eb"><span class="muted">Espera antes de iniciar: ${t.tiempos.esperaInicioMin||0} min</span><br><span class="muted">Espera validación/liberación: ${t.tiempos.esperaValidacionMin||0} min</span></td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}</td></tr>`).join('')}</tbody></table>`}
+function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio MTTO: ${fmt(t.iniciado)}</span><br><span class="muted">Fin MTTO: ${fmt(t.terminado)}</span><br><span class="muted">Liberado: ${fmt(t.liberado)}</span></td><td>
+<div style="background:#eef6ff;border:1px solid #b6daf7;padding:10px;border-radius:12px;margin-bottom:8px">
+  <b>MTTO</b><br>
+  <span style="font-size:20px;font-weight:900">${t.tiempos.mttoMin} min</span><br>
+  <span class="muted">Acepta: ${fmt(t.iniciado)}</span><br>
+  <span class="muted">Finaliza: ${fmt(t.terminado)}</span>
+</div>
+<div style="background:#fff4e6;border:1px solid #ffd39a;padding:10px;border-radius:12px;margin-bottom:8px">
+  <b>Operaciones</b><br>
+  <span style="font-size:20px;font-weight:900">${t.tiempos.produccionMin} min</span><br>
+  <span class="muted">Espera antes de MTTO: ${t.tiempos.esperaInicioMin||0} min</span><br>
+  <span class="muted">Espera liberación usuario: ${t.tiempos.esperaValidacionMin||0} min</span>
+</div>
+<hr style="border:0;border-top:1px solid #e5e7eb">
+<b>Total muerto:</b> ${t.tiempos.muertoTotalMin} min
+</td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}</td></tr>`).join('')}</tbody></table>`}
 function activosView(){return `<div class="card"><h2>Importar activos desde Excel</h2><p class="muted">Acepta tu formato actual: NUM ACTIVO, DESCRIPCION, AREA, TIPO, SUCURSAL, UBICACION, MARCA, MODELO, USUARIO, ESTATUS.</p>${isAdmin()?`<input type="file" id="excelActivos" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/activos','excelActivos')">Importar activos</button>`:'<p class="muted">Solo admin puede importar.</p>'}</div>${isAdmin()?`<div class="card"><h2>Agregar activo manual</h2><div class="grid4"><input id="aNum" placeholder="Número"><input id="aDesc" placeholder="Descripción"><input id="aArea" placeholder="Área"><select id="aTipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select><input id="aSuc" placeholder="Sucursal"><input id="aUbi" placeholder="Ubicación"><input id="aMarca" placeholder="Marca"><input id="aModelo" placeholder="Modelo"><input id="aUsuario" placeholder="Usuario responsable"><input id="aEstatus" placeholder="Estatus" value="VIGENTE"></div><button class="btn-orange" onclick="agregarActivo()">Guardar activo</button></div>`:''}<div class="card"><h2>Activos</h2><div class="searchbox"><input id="qActivos" oninput="filterActivos(this.value)" placeholder="Buscar por palabra clave: activo, descripción, área, tipo, sucursal, ubicación, marca, usuario, estatus"></div><div id="activosTable">${tablaActivos(activos)}</div></div>`}
 async function importar(endpoint,inputId){showLoading('Importando Excel...');try{let file=document.getElementById(inputId).files[0];if(!file)return alert('Selecciona un Excel');let fd=new FormData();fd.append('archivo',file);let r=await api(endpoint,{method:'POST',body:fd});alert(`Importado\nAgregados: ${r.agregados}\nActualizados: ${r.actualizados}\nOmitidos: ${r.omitidos}`);render()}catch(e){alert('Error: '+e.message)}finally{hideLoading()}}
 async function agregarActivo(){if(!isAdmin()) return alert('Solo administrador puede agregar activos');await api('/api/activos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numero:aNum.value,descripcion:aDesc.value,area:aArea.value,tipo:aTipo.value,sucursal:aSuc.value,ubicacion:aUbi.value,marca:aMarca.value,modelo:aModelo.value,usuario:aUsuario.value,estatus:aEstatus.value})});render()}
@@ -363,6 +402,7 @@ function simpleStats(title,obj){return `<div class="card"><h2>${title}</h2>${Obj
 window.changePass=changePass;
 window.crearTicket=crearTicket;
 window.asignar=asignar;
+window.aceptar=aceptar;
 window.iniciar=iniciar;
 window.terminar=terminar;
 window.liberar=liberar;
