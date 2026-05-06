@@ -102,8 +102,14 @@ function canReleaseTicket(user, ticket){
 function addScopedClauses(user, params, clauses, alias=''){
   const p = alias ? alias + '.' : '';
   if(!user || isGlobalUser(user)) return;
-  if(clean(user.sucursal)){ params.push(norm(user.sucursal)); clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`); }
-  if(clean(user.area_asignada)){ params.push(norm(user.area_asignada)); clauses.push(`upper(coalesce(${p}area,'')) = $${params.length}`); }
+
+  // Usuarios normales ven activos/herramientas de TODA su sucursal.
+  // No se filtra por área porque el Excel puede traer áreas como PRODUCCION,
+  // TOOL CRIB, TALLER, etc. y si no coincide exacto, no aparece el listado.
+  if(clean(user.sucursal)){
+    params.push(norm(user.sucursal));
+    clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`);
+  }
 }
 
 function addTicketVisibilityClauses(user, params, clauses, alias=''){
@@ -457,34 +463,104 @@ app.post('/api/activos', requireAdmin, async (req,res)=>{
 
 app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (req,res)=>{
   if(!req.file) return res.status(400).json({error:'Sube un archivo Excel.'});
+
   const wb = XLSX.read(req.file.buffer, { type:'buffer' });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
+
   let agregados=0, actualizados=0, omitidos=0;
+
+  function pick(row, names){
+    for(const n of names){
+      if(row[n] !== undefined && clean(row[n]) !== '') return clean(row[n]);
+    }
+    return '';
+  }
+
   for(const row of rows){
+    // Formato recibido: ACTIVOS MATRIZ - SUCURSALES.xlsx
+    // Solo se toman los campos que ocupa el sistema. Todo lo demás se ignora:
+    // FECHA CREACION, PRESTAMO, TIENE FOTO, COSTO, MONEDA, PROVEEDOR, FACTURA, etc.
     const a = {
-      numero: row['NUM ACTIVO'] ?? row['numero'] ?? row['NUMERO'] ?? row['No ACTIVO'],
-      descripcion: row['DESCRIPCION'] ?? row['DESCRIPCIÓN'] ?? row['descripcion'],
-      area: row['AREA'] ?? row['area'],
-      tipo: row['TIPO'] ?? row['tipo'],
-      sucursal: row['SUCURSAL'] ?? row['sucursal'],
-      ubicacion: row['UBICACION'] ?? row['UBICACIÓN'] ?? row['ubicacion'],
-      marca: row['MARCA'] ?? row['marca'],
-      modelo: row['MODELO'] ?? row['modelo'],
-      usuario: row['USUARIO'] ?? row['usuario'],
-      estatus: row['ESTATUS'] ?? row['ESTADO'] ?? row['estatus']
+      numero: pick(row, ['NUM ACTIVO','NUMERO ACTIVO','NÚM ACTIVO','numero','NUMERO','No ACTIVO','NO ACTIVO']),
+      descripcion: pick(row, ['DESCRIPCION','DESCRIPCIÓN','descripcion','DESCRIPCION ACTIVO','DESCRIPCIÓN ACTIVO']),
+      area: pick(row, ['AREA','ÁREA','area']),
+      tipo: pick(row, ['TIPO','tipo']),
+      sucursal: pick(row, ['SUCURSAL','sucursal']),
+      ubicacion: pick(row, ['UBICACION','UBICACIÓN','ubicacion','LOCALIZACION','LOCALIZACIÓN']),
+      marca: pick(row, ['MARCA','marca']),
+      modelo: pick(row, ['MODELO','modelo']),
+      usuario: pick(row, ['USUARIO','usuario','RESPONSABLE','RESGUARDO']),
+      estatus: pick(row, ['ESTATUS','ESTADO','estatus','estado'])
     };
-    if(!clean(a.numero) || !clean(a.descripcion)){ omitidos++; continue; }
-    const search = norm([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
-    const exists = await pool.query('select id from activos where numero=$1', [clean(a.numero)]);
-    await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
-      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      on conflict(numero) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()`,
-      [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal || 'SIN SUCURSAL'),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus),search]);
+
+    if(!a.numero || !a.descripcion){
+      omitidos++;
+      continue;
+    }
+
+    const search = norm([
+      a.numero,
+      a.descripcion,
+      a.area,
+      a.tipo,
+      a.sucursal,
+      a.ubicacion,
+      a.marca,
+      a.modelo,
+      a.usuario,
+      a.estatus
+    ].join(' '));
+
+    const exists = await pool.query('select id from activos where numero=$1', [a.numero]);
+
+    await pool.query(`
+      insert into activos(
+        numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text
+      ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      on conflict(numero) do update set
+        descripcion=excluded.descripcion,
+        area=excluded.area,
+        tipo=excluded.tipo,
+        sucursal=excluded.sucursal,
+        ubicacion=excluded.ubicacion,
+        marca=excluded.marca,
+        modelo=excluded.modelo,
+        usuario=excluded.usuario,
+        estatus=excluded.estatus,
+        search_text=excluded.search_text,
+        updated_at=now()
+    `,[
+      a.numero,
+      a.descripcion,
+      a.area,
+      a.tipo,
+      a.sucursal || 'SIN SUCURSAL',
+      a.ubicacion,
+      a.marca,
+      a.modelo,
+      a.usuario,
+      a.estatus || 'VIGENTE',
+      search
+    ]);
+
     exists.rows.length ? actualizados++ : agregados++;
   }
-  await logAction(req.session.user.id, 'import_assets', {agregados,actualizados,omitidos});
-  res.json({agregados,actualizados,omitidos,total:rows.length});
+
+  await logAction(req.session.user.id, 'import_assets', {
+    agregados,
+    actualizados,
+    omitidos,
+    columnas_usadas:['NUM ACTIVO','TIPO','ESTATUS','DESCRIPCION','MARCA','MODELO','SUCURSAL','AREA','UBICACION','USUARIO']
+  });
+
+  res.json({
+    agregados,
+    actualizados,
+    omitidos,
+    total:rows.length,
+    campos_usados:['NUM ACTIVO','TIPO','ESTATUS','DESCRIPCION','MARCA','MODELO','SUCURSAL','AREA','UBICACION','USUARIO']
+  });
 });
 
 
