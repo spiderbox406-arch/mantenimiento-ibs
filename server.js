@@ -246,6 +246,19 @@ async function initDb(){
       details jsonb default '{}'::jsonb,
       created_at timestamptz not null default now()
     );
+    create table if not exists empleados_reportantes(
+      id bigserial primary key,
+      numero_empleado text,
+      nombre text not null,
+      sucursal text,
+      area text,
+      puesto text,
+      correo text,
+      telefono text,
+      status text not null default 'activo',
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
   `);
 
   // Migraciones seguras para bases Neon existentes
@@ -289,6 +302,15 @@ async function initDb(){
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS total_muerto_min int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_reporte jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_trabajo jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS numero_empleado text;
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS nombre text;
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS sucursal text;
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS area text;
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS puesto text;
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS correo text;
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS telefono text;
+    ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'activo';
   `);
 
   await pool.query(`
@@ -395,10 +417,11 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
   addScopedClauses(user, assetParams, assetClauses);
   const assetsWhere = buildWhere(assetClauses);
 
-  const [a,t,g] = await Promise.all([
+  const [a,t,g,er] = await Promise.all([
     pool.query(`select * from activos ${assetsWhere} order by sucursal, area, numero limit 5000`, assetParams),
     pool.query("select id, name, username, role, can_export, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('tecnico','mantenimiento','admin') order by sucursal, name"),
-    pool.query("select id, name, username, role, can_export, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('gerente','mantenimiento','admin') order by case when role='gerente' then 0 when role='mantenimiento' then 1 else 2 end, sucursal, name")
+    pool.query("select id, name, username, role, can_export, sucursal, area_asignada, telefono, correo from users where status='activo' and role in ('gerente','mantenimiento','admin') order by case when role='gerente' then 0 when role='mantenimiento' then 1 else 2 end, sucursal, name"),
+    pool.query("select id, numero_empleado, nombre, sucursal, area, puesto, telefono, correo, status from empleados_reportantes where status='activo' order by sucursal, area, nombre limit 5000")
   ]);
 
   let empleados = [];
@@ -407,7 +430,7 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
     empleados = e.rows;
   }
 
-  res.json({activos:a.rows, empleados, tecnicos:t.rows, gerentes:g.rows});
+  res.json({activos:a.rows, empleados, empleados_reportantes:er.rows, tecnicos:t.rows, gerentes:g.rows});
 });
 
 app.get('/api/activos', requireLogin, async (req,res)=>{
@@ -592,27 +615,159 @@ app.delete('/api/users/:id', requireAdmin, async (req,res)=>{
     client.release();
   }
 });
+app.get('/api/empleados-reportantes', requireLogin, async (req,res)=>{
+  try{
+    const q = norm(req.query.q || '');
+    const params = [];
+    const clauses = ["status='activo'"];
+
+    if(q){
+      params.push('%' + q + '%');
+      clauses.push(`upper(coalesce(numero_empleado,'')||' '||coalesce(nombre,'')||' '||coalesce(sucursal,'')||' '||coalesce(area,'')||' '||coalesce(puesto,'')||' '||coalesce(correo,'')||' '||coalesce(telefono,'')) like $${params.length}`);
+    }
+
+    const where = buildWhere(clauses);
+    const r = await pool.query(`
+      select id, numero_empleado, nombre, sucursal, area, puesto, telefono, correo, status
+      from empleados_reportantes
+      ${where}
+      order by sucursal, area, nombre
+      limit 1000
+    `, params);
+
+    res.json(r.rows);
+  }catch(err){
+    console.error('Error consultando empleados reportantes:', err);
+    res.status(500).json({error:err.message});
+  }
+});
+
 app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async (req,res)=>{
   if(!req.file) return res.status(400).json({error:'Sube un archivo Excel.'});
-  const wb=XLSX.read(req.file.buffer,{type:'buffer'}); const ws=wb.Sheets[wb.SheetNames[0]]; const rows=XLSX.utils.sheet_to_json(ws,{defval:''});
-  let agregados=0,actualizados=0,omitidos=0;
+
+  const wb = XLSX.read(req.file.buffer,{type:'buffer'});
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws,{defval:''});
+
+  let agregados=0, actualizados=0, omitidos=0;
+
+  function keyName(k){
+    return String(k || '')
+      .toUpperCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'')
+      .replace(/[^A-Z0-9]/g,'');
+  }
+
+  function pick(row, names){
+    const map = {};
+    Object.keys(row).forEach(k => { map[keyName(k)] = row[k]; });
+    for(const n of names){
+      const v = map[keyName(n)];
+      if(v !== undefined && clean(v) !== '') return clean(v);
+    }
+    return '';
+  }
+
   for(const row of rows){
-    const username=clean(row.usuario ?? row.USUARIO ?? row.username ?? row.USERNAME);
-    const name=clean(row.nombre ?? row.NOMBRE ?? row.name ?? row.NAME);
-    if(!username || !name){omitidos++; continue;}
-    const exists=await pool.query('select id from users where lower(username)=lower($1)',[username]);
-    const role=clean(row.rol ?? row.ROL ?? 'operaciones').toLowerCase();
+    const numero = pick(row, [
+      'numeroEmpleado','NUMERO_EMPLEADO','NUM EMPLEADO','NO EMPLEADO',
+      'NUMERO','NÚMERO','#','EMPLOYEE ID','CODIGO','ID'
+    ]);
+
+    const nombre = pick(row, [
+      'nombre','NOMBRE','NOMBRE EMPLEADO','EMPLEADO','COLABORADOR','TRABAJADOR','name','NAME'
+    ]);
+
+    if(!nombre){
+      omitidos++;
+      continue;
+    }
+
+    const sucursal = pick(row, ['sucursal','SUCURSAL','PLANTA']) || 'CHIHUAHUA';
+    const area = pick(row, ['areaAsignada','AREA ASIGNADA','AREA','DEPARTAMENTO','DEPTO','departamento']);
+    const puesto = pick(row, ['puesto','PUESTO','rol','ROL','CARGO']);
+    const correo = pick(row, ['correo','CORREO','EMAIL','E-MAIL','MAIL','email']);
+    const telefono = pick(row, ['telefono','TELEFONO','TELÉFONO','CELULAR','CEL','WHATSAPP']);
+
+    let exists;
+    if(numero){
+      exists = await pool.query(
+        "select id from empleados_reportantes where coalesce(numero_empleado,'')=$1 limit 1",
+        [numero]
+      );
+    }else{
+      exists = await pool.query(
+        "select id from empleados_reportantes where upper(nombre)=upper($1) and upper(coalesce(sucursal,''))=upper($2) limit 1",
+        [nombre, sucursal]
+      );
+    }
+
     if(exists.rows.length){
-      await pool.query(`update users set numero_empleado=$1,name=$2,role=$3,sucursal=$4,area_asignada=$5,telefono=$6,correo=$7,updated_at=now() where id=$8`, [clean(row.numeroEmpleado ?? row.NUMERO_EMPLEADO ?? row['NUM EMPLEADO']),name,role,clean(row.sucursal ?? row.SUCURSAL),clean(row.areaAsignada ?? row.AREA ?? row.area),clean(row.telefono ?? row.TELEFONO),clean(row.correo ?? row.CORREO),exists.rows[0].id]);
+      await pool.query(`
+        update empleados_reportantes
+        set
+          numero_empleado=$1,
+          nombre=$2,
+          sucursal=$3,
+          area=$4,
+          puesto=$5,
+          correo=$6,
+          telefono=$7,
+          status='activo',
+          updated_at=now()
+        where id=$8
+      `,[
+        numero,
+        nombre,
+        sucursal,
+        area,
+        puesto,
+        correo,
+        telefono,
+        exists.rows[0].id
+      ]);
       actualizados++;
-    } else {
-      const pass=String(row.password ?? row.PASSWORD ?? 'Temp1234'); const hash=await bcrypt.hash(pass,12);
-      await pool.query(`insert into users(numero_empleado,name,username,password_hash,role,status,must_change_password,sucursal,area_asignada,telefono,correo,can_export) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9,$10)`, [clean(row.numeroEmpleado ?? row.NUMERO_EMPLEADO ?? row['NUM EMPLEADO']),name,username,hash,role,clean(row.sucursal ?? row.SUCURSAL),clean(row.areaAsignada ?? row.AREA ?? row.area),clean(row.telefono ?? row.TELEFONO),clean(row.correo ?? row.CORREO), role === 'gerente' || role === 'admin']);
+    }else{
+      await pool.query(`
+        insert into empleados_reportantes(
+          numero_empleado,
+          nombre,
+          sucursal,
+          area,
+          puesto,
+          correo,
+          telefono,
+          status
+        )
+        values($1,$2,$3,$4,$5,$6,$7,'activo')
+      `,[
+        numero,
+        nombre,
+        sucursal,
+        area,
+        puesto,
+        correo,
+        telefono
+      ]);
       agregados++;
     }
   }
-  await logAction(req.session.user.id, 'import_users', {agregados,actualizados,omitidos});
-  res.json({agregados,actualizados,omitidos,total:rows.length});
+
+  await logAction(req.session.user.id, 'import_empleados_reportantes', {
+    agregados,
+    actualizados,
+    omitidos,
+    total: rows.length
+  });
+
+  res.json({
+    agregados,
+    actualizados,
+    omitidos,
+    total: rows.length,
+    tipo:'empleados_reportantes'
+  });
 });
 
 app.get('/api/tickets', requireLogin, async (req,res)=>{
