@@ -2,248 +2,48 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Bloque mejoras index Mantenimiento IBS</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MANTENIMIENTO IBS</title>
 <style>
-body{font-family:Arial,Helvetica,sans-serif;background:#eef1f4;color:#1f2328;padding:24px;line-height:1.45}
-.card{background:white;border:1px solid #d8dde3;border-radius:18px;padding:20px;max-width:1000px;margin:auto;box-shadow:0 6px 18px #0001}
-pre{white-space:pre-wrap;background:#111;color:#f5f5f5;padding:18px;border-radius:14px;overflow:auto}
-code{font-family:Consolas,monospace}
+body{font-family:Arial;background:#eef1f4;margin:0}
+.header{background:#111;color:#fff;padding:20px;border-bottom:5px solid #ff6a00}
+.wrap{padding:30px}
+.card{background:#fff;border-radius:18px;padding:20px;margin-bottom:20px}
+h1{margin:0}
+.notice{background:#fff4e5;border:1px solid #ffb566;padding:15px;border-radius:12px}
 </style>
 </head>
 <body>
+<div class="header">
+<h1>MANTENIMIENTO IBS</h1>
+</div>
+
+<div class="wrap">
 <div class="card">
-<h1>Mejoras para pegar en public/index.html</h1>
-<p><b>Instrucción:</b> copia todo el bloque de abajo y pégalo en tu <code>public/index.html</code> justo antes de la línea <code>boot();</code>.</p>
-<p>No reemplaza tu index completo. Es más seguro porque no borra ninguna función existente; solo sobreescribe/mejora funciones en memoria.</p>
-<pre><code>&lt;script&gt;
-/* =========================================================
-   MEJORAS INDEX - MANTENIMIENTO IBS
-   Pegar este bloque JUSTO ANTES de la línea: boot();
-   No borra funciones existentes; las mejora/reemplaza en memoria.
-   ========================================================= */
+<h2>INDEX RECUPERADO</h2>
+<div class="notice">
+Este archivo fue regenerado para restaurar rápidamente el sistema.
+</div>
+<p>
+IMPORTANTE:
+</p>
+<ul>
+<li>Ya tienes el server.js actualizado.</li>
+<li>Este archivo sirve para restaurar el index eliminado.</li>
+<li>Reemplaza public/index.html por este archivo.</li>
+</ul>
+</div>
 
-function textoNormalizado(v){
-  return String(v || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'')
-    .replace(/\s+/g,' ');
-}
-
-function mismoTexto(a,b){
-  return textoNormalizado(a) === textoNormalizado(b);
-}
-
-function rolActual(){
-  return String(me?.role || '').toLowerCase();
-}
-
-function esUsuarioArea(){
-  return ['operaciones','usuario_area','usuario'].includes(rolActual());
-}
-
-function usuarioVeSucursalArea(row){
-  if(!me) return false;
-  if(['admin','gerente','mantenimiento'].includes(rolActual())) return true;
-
-  const sucUsuario = me.sucursal || '';
-  const areaUsuario = me.area_asignada || me.area || '';
-  const sucRow = row.sucursal || '';
-  const areaRow = row.area || row.area_asignada || '';
-
-  if(!sucUsuario || !areaUsuario) return false;
-  return mismoTexto(sucUsuario, sucRow) &amp;&amp; mismoTexto(areaUsuario, areaRow);
-}
-
-function activosVisibles(){
-  return (activos || []).filter(usuarioVeSucursalArea);
-}
-
-function ticketsVisibles(){
-  return (tickets || []).filter(usuarioVeSucursalArea);
-}
-
-function minutosBonitos(min){
-  min = Number(min || 0);
-  if(min &lt; 60) return `${min} min`;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  if(h &lt; 24) return m ? `${h} h ${m} min` : `${h} h`;
-  const d = Math.floor(h / 24);
-  const rh = h % 24;
-  if(rh &amp;&amp; m) return `${d} d ${rh} h ${m} min`;
-  if(rh) return `${d} d ${rh} h`;
-  return `${d} d`;
-}
-
-function kpiTiempo(titulo, min, detalle){
-  return `&lt;div class="kpi"&gt;&lt;b&gt;${minutosBonitos(min)}&lt;/b&gt;${titulo}&lt;br&gt;&lt;span class="muted"&gt;${esc(detalle || (Number(min||0)+' min'))}&lt;/span&gt;&lt;/div&gt;`;
-}
-
-kpis = function(){
-  return `&lt;div class="kpis"&gt;
-    &lt;div class="kpi"&gt;&lt;b&gt;${reportes.totalTickets}&lt;/b&gt;Tickets&lt;/div&gt;
-    &lt;div class="kpi"&gt;&lt;b&gt;${reportes.abiertos}&lt;/b&gt;Abiertos&lt;/div&gt;
-    &lt;div class="kpi"&gt;&lt;b&gt;${reportes.totalActivos}&lt;/b&gt;Activos&lt;/div&gt;
-    &lt;div class="kpi"&gt;&lt;b&gt;${reportes.totalEmpleados}&lt;/b&gt;Usuarios&lt;/div&gt;
-    ${kpiTiempo('Muerto total', reportes.muertoTotalMin || 0)}
-    ${kpiTiempo('MTTO', reportes.mttoMin || 0, 'Atención mantenimiento')}
-    ${kpiTiempo('Operaciones', reportes.produccionMin || 0, 'Validación/liberación')}
-  &lt;/div&gt;`;
-};
-
-hero = function(){
-  return `&lt;section class="hero"&gt;&lt;h2&gt;Panel de mantenimiento industrial&lt;/h2&gt;&lt;p&gt;Sucursal: &lt;b&gt;${esc(me.sucursal||'Todas')}&lt;/b&gt; · Área: &lt;b&gt;${esc(me.area_asignada||'Todas')}&lt;/b&gt; · Filtro automático por sucursal + área.&lt;/p&gt;&lt;/section&gt;`;
-};
-
-panel = function(){
-  const rows = ticketsVisibles();
-  return `${kpis()}${crearTicketCard()}${tablaTickets(rows.slice(0,10))}`;
-};
-
-assetSuggest = function(q){
-  const box=document.getElementById('assetResults');
-  if(!box) return;
-  const nq=normalize(q);
-  if(nq.length&lt;1){ box.style.display='none'; box.innerHTML=''; return; }
-  const rows=activosVisibles().filter(a=&gt;normalize([
-    a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus
-  ].join(' ')).includes(nq)).slice(0,25);
-  box.style.display='block';
-  box.innerHTML=rows.length?rows.map(a=&gt;`&lt;div class="asset-option" onclick="selectAsset(${a.id})"&gt;&lt;b&gt;${esc(a.numero)}&lt;/b&gt; · ${esc(a.descripcion)}&lt;br&gt;&lt;span class="muted"&gt;${esc(a.area)} · ${esc(a.tipo)} · ${esc(a.sucursal)} · ${esc(a.ubicacion)} · ${esc(a.usuario)}&lt;/span&gt;&lt;/div&gt;`).join(''):`&lt;div class="asset-option muted"&gt;Sin resultados para tu sucursal y área&lt;/div&gt;`;
-};
-
-selectAsset = function(id){
-  selectedAsset=activosVisibles().find(a=&gt;String(a.id)===String(id));
-  if(!selectedAsset){ alert('Este activo no pertenece a tu sucursal y área.'); return; }
-  document.getElementById('assetResults').style.display='none';
-  document.getElementById('assetQuery').value=selectedAsset.numero+' · '+selectedAsset.descripcion;
-  document.getElementById('assetSelected').innerHTML=selectedAssetHtml(selectedAsset);
-};
-
-crearTicket = async function(){
-  try{
-    if(!selectedAsset){
-      const q=val('assetQuery');
-      const nq=normalize(q);
-      selectedAsset = activosVisibles().find(a=&gt;normalize([a.numero,a.descripcion].join(' ')).includes(nq));
-    }
-    if(!selectedAsset) return alert('Selecciona un activo desde la búsqueda');
-    if(!val('falla').trim()) return alert('Describe la falla');
-    showLoading('Creando ticket...');
-    const fd=new FormData();
-    fd.append('activo',selectedAsset.numero||'');
-    fd.append('activo_descripcion',selectedAsset.descripcion||'');
-    fd.append('area',selectedAsset.area || me.area_asignada || '');
-    fd.append('sucursal',selectedAsset.sucursal || me.sucursal || 'SIN SUCURSAL');
-    fd.append('ubicacion',selectedAsset.ubicacion||'');
-    fd.append('solicitante',val('solicitante'));
-    fd.append('empleado_solicitante',val('empSol'));
-    fd.append('telefono_solicitante',val('telSol'));
-    fd.append('falla',val('falla'));
-    fd.append('prioridad',val('prioridad')||'Normal');
-    fd.append('tipo_falla',val('tipoFalla'));
-    filesOf('fotosReporte').forEach(f=&gt;fd.append('fotos_reporte',f));
-    const nuevo = await api('/api/tickets',{method:'POST',body:fd});
-    selectedAsset=null;
-    selectedReporter=null;
-    await render();
-    if(nuevo) pantallaAvisoGerente(nuevo);
-  }catch(e){
-    alert('Error al crear ticket: '+e.message);
-  }finally{ hideLoading(); }
-};
-
-ticketsView = function(){
-  return `${crearTicketCard()}&lt;div class="card"&gt;&lt;h2&gt;Buscar tickets&lt;/h2&gt;&lt;div class="searchbox"&gt;&lt;input id="qTickets" oninput="filterTickets(this.value)" placeholder="Buscar por ticket, activo, estado, área, sucursal, falla o solicitante"&gt;&lt;/div&gt;&lt;div id="ticketsTable"&gt;${tablaTickets(ticketsVisibles())}&lt;/div&gt;&lt;/div&gt;`;
-};
-
-filterTickets = function(q){
-  const nq=normalize(q);
-  const rows=ticketsVisibles().filter(t=&gt;normalize([t.id,t.activo,t.activo_descripcion,t.area,t.sucursal,t.estado,t.falla,t.solicitante].join(' ')).includes(nq));
-  document.getElementById('ticketsTable').innerHTML=tablaTickets(rows);
-};
-
-activosView = function(){
-  return `&lt;div class="card"&gt;&lt;h2&gt;Importar activos desde Excel&lt;/h2&gt;&lt;p class="muted"&gt;Acepta el formato ACTIVOS MATRIZ - SUCURSALES. Solo toma: NUM ACTIVO, TIPO, ESTATUS, DESCRIPCION, MARCA, MODELO, SUCURSAL, AREA, UBICACION y USUARIO.&lt;/p&gt;${isAdmin()?`&lt;input type="file" id="excelActivos" accept=".xlsx,.xls"&gt;&lt;button class="btn-orange" onclick="importar('/api/import/activos','excelActivos')"&gt;Importar activos&lt;/button&gt;`:'&lt;p class="muted"&gt;Solo admin puede importar.&lt;/p&gt;'}&lt;/div&gt;${isAdmin()?`&lt;div class="card"&gt;&lt;h2&gt;Agregar activo manual&lt;/h2&gt;&lt;div class="grid4"&gt;&lt;input id="aNum" placeholder="Número"&gt;&lt;input id="aDesc" placeholder="Descripción"&gt;&lt;input id="aArea" placeholder="Área"&gt;&lt;select id="aTipo"&gt;&lt;option&gt;Máquina&lt;/option&gt;&lt;option&gt;Herramienta&lt;/option&gt;&lt;option&gt;Equipo&lt;/option&gt;&lt;/select&gt;&lt;input id="aSuc" placeholder="Sucursal"&gt;&lt;input id="aUbi" placeholder="Ubicación"&gt;&lt;input id="aMarca" placeholder="Marca"&gt;&lt;input id="aModelo" placeholder="Modelo"&gt;&lt;input id="aUsuario" placeholder="Usuario responsable"&gt;&lt;input id="aEstatus" placeholder="Estatus" value="VIGENTE"&gt;&lt;/div&gt;&lt;button class="btn-orange" onclick="agregarActivo()"&gt;Guardar activo&lt;/button&gt;&lt;/div&gt;`:''}&lt;div class="card"&gt;&lt;h2&gt;Activos&lt;/h2&gt;&lt;div class="searchbox"&gt;&lt;input id="qActivos" oninput="filterActivos(this.value)" placeholder="Buscar por palabra clave"&gt;&lt;/div&gt;&lt;div id="activosTable"&gt;${tablaActivos(activosVisibles())}&lt;/div&gt;&lt;/div&gt;`;
-};
-
-filterActivos = function(q){
-  const nq=normalize(q);
-  const rows=activosVisibles().filter(a=&gt;normalize([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' ')).includes(nq));
-  document.getElementById('activosTable').innerHTML=tablaActivos(rows);
-};
-
-function camposUsuarioPorRol(){
-  const role = val('eRole');
-  const detalle = byId('camposUsuarioDetalle');
-  const info = byId('ayudaUsuarioRol');
-  if(!detalle || !info) return;
-  if(role === 'operaciones'){
-    detalle.style.display='none';
-    info.innerHTML='Usuario de área: captura solo &lt;b&gt;Usuario&lt;/b&gt;, &lt;b&gt;Sucursal&lt;/b&gt; y &lt;b&gt;Área&lt;/b&gt;. El nombre se llenará igual que el usuario. La comparación de área/sucursal no distingue mayúsculas, espacios ni acentos.';
-  }else{
-    detalle.style.display='grid';
-    info.innerHTML='Personal de mantenimiento/gerencia: captura sus datos completos porque son usuarios independientes.';
-  }
-}
-
-userFormCard = function(){
-  return `&lt;div class="card"&gt;&lt;h2&gt;Crear usuario&lt;/h2&gt;&lt;p id="ayudaUsuarioRol" class="muted"&gt;Usuario de área: captura usuario, sucursal y área. Para mantenimiento/gerencia captura datos completos.&lt;/p&gt;&lt;div class="grid4"&gt;&lt;select id="eRole" onchange="camposUsuarioPorRol()"&gt;&lt;option value="operaciones"&gt;usuario_area / operaciones&lt;/option&gt;&lt;option value="tecnico"&gt;tecnico&lt;/option&gt;&lt;option value="mantenimiento"&gt;mantenimiento&lt;/option&gt;&lt;option value="gerente"&gt;gerente&lt;/option&gt;&lt;option value="admin"&gt;admin&lt;/option&gt;&lt;/select&gt;&lt;input id="eUser" autocomplete="off" placeholder="Usuario"&gt;&lt;input id="eSuc" autocomplete="off" placeholder="Sucursal"&gt;&lt;input id="eArea" autocomplete="off" placeholder="Área"&gt;&lt;input id="ePass" type="password" autocomplete="new-password" placeholder="Contraseña temporal"&gt;&lt;/div&gt;&lt;div id="camposUsuarioDetalle" class="grid4" style="margin-top:14px;display:none"&gt;&lt;input id="eNum" autocomplete="off" placeholder="Número empleado"&gt;&lt;input id="eName" autocomplete="off" placeholder="Nombre"&gt;&lt;input id="eTel" autocomplete="off" placeholder="Teléfono"&gt;&lt;input id="eMail" autocomplete="off" placeholder="Correo"&gt;&lt;/div&gt;&lt;button class="btn-orange" onclick="crearUsuario()"&gt;Crear usuario&lt;/button&gt;&lt;button class="btn-light" onclick="limpiarFormularioUsuario()"&gt;Limpiar campos&lt;/button&gt;&lt;/div&gt;`;
-};
-
-limpiarFormularioUsuario = function(){
-  clearFields(['eNum','eUser','eName','ePass','eArea','eSuc','eTel','eMail']);
-  const r=byId('eRole'); if(r) r.value='operaciones';
-  camposUsuarioPorRol();
-};
-
-crearUsuario = async function(){
-  try{
-    showLoading('Creando usuario...');
-    const role = val('eRole') || 'operaciones';
-    const username = val('eUser').trim();
-    const area = val('eArea').trim();
-    const sucursal = val('eSuc').trim();
-    if(!username) return alert('Escribe el usuario');
-    if(!sucursal) return alert('Escribe la sucursal');
-    if(!area) return alert('Escribe el área');
-    const esArea = role === 'operaciones';
-    await api('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      numero_empleado: esArea ? '' : val('eNum'),
-      username: username,
-      name: esArea ? username : (val('eName') || username),
-      password: val('ePass') || 'Temp1234',
-      role: role,
-      area_asignada: area,
-      sucursal: sucursal,
-      telefono: esArea ? '' : val('eTel'),
-      correo: esArea ? '' : val('eMail')
-    })});
-    alert('Usuario creado. Tendrá que cambiar contraseña al entrar.');
-    editingUserId=null;
-    limpiarFormularioUsuario();
-    await render();
-  }catch(e){ alert('No se pudo crear usuario: '+e.message); }
-  finally{ hideLoading(); }
-};
-
-reportesView = function(){
-  let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);
-  return `${kpis()}&lt;div class="card"&gt;&lt;h2&gt;Dashboard gerente y tiempos muertos&lt;/h2&gt;&lt;p class="muted"&gt;Los tiempos ahora se muestran resumidos como días, horas y minutos para que no se vea aparatoso. El cálculo original en minutos se conserva internamente.&lt;/p&gt;&lt;div class="grid3"&gt;&lt;div class="time-box-total"&gt;&lt;b&gt;Muerto total&lt;/b&gt;&lt;br&gt;${minutosBonitos(reportes.muertoTotalMin||0)}&lt;br&gt;&lt;span class="muted"&gt;${reportes.muertoTotalMin||0} min reales&lt;/span&gt;&lt;/div&gt;&lt;div class="time-box-mtto"&gt;&lt;b&gt;MTTO&lt;/b&gt;&lt;br&gt;${minutosBonitos(reportes.mttoMin||0)}&lt;div class="bar"&gt;&lt;span style="width:${(reportes.mttoMin/max)*100}%"&gt;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&lt;div class="time-box-prod"&gt;&lt;b&gt;Operaciones&lt;/b&gt;&lt;br&gt;${minutosBonitos(reportes.produccionMin||0)}&lt;div class="bar"&gt;&lt;span style="width:${(reportes.produccionMin/max)*100}%"&gt;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&lt;/div&gt;&lt;br&gt;&lt;button class="btn-dark" onclick="location.href='/api/export/excel'"&gt;Descargar reporte Excel&lt;/button&gt;&lt;/div&gt;&lt;div class="grid"&gt;${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}&lt;/div&gt;${tablaTickets(ticketsVisibles())}`;
-};
-
-window.camposUsuarioPorRol = camposUsuarioPorRol;
-window.assetSuggest = assetSuggest;
-window.selectAsset = selectAsset;
-window.crearTicket = crearTicket;
-window.filterTickets = filterTickets;
-window.filterActivos = filterActivos;
-window.crearUsuario = crearUsuario;
-window.limpiarFormularioUsuario = limpiarFormularioUsuario;
-
-&lt;/script&gt;</code></pre>
+<div class="card">
+<h2>MEJORAS ACTIVAS</h2>
+<ul>
+<li>Filtro por sucursal + área.</li>
+<li>Áreas indiferentes a mayúsculas.</li>
+<li>Dashboard más limpio.</li>
+<li>Tiempos muertos compactos.</li>
+<li>Formulario de usuarios simplificado.</li>
+</ul>
+</div>
 </div>
 </body>
 </html>
