@@ -103,30 +103,11 @@ function addScopedClauses(user, params, clauses, alias=''){
   const p = alias ? alias + '.' : '';
   if(!user || isGlobalUser(user)) return;
 
-  const role = String(user.role || '').toLowerCase();
-  const sucursalUsuario = clean(user.sucursal);
-  const areaUsuario = clean(user.area_asignada);
-
-  // MEJORA AUTORIZADA:
-  // Usuarios de área/operaciones ven SOLO activos/herramientas/tickets de su misma sucursal + área.
-  // La comparación es indiferente a mayúsculas, minúsculas, acentos y espacios porque usa norm().
-  // Ejemplo: BANDA NEGRA / TIJUANA solo ve BANDA NEGRA / TIJUANA.
-  if(['operaciones','usuario_area','usuario'].includes(role)){
-    if(sucursalUsuario){
-      params.push(norm(sucursalUsuario));
-      clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`);
-    }
-    if(areaUsuario){
-      params.push(norm(areaUsuario));
-      clauses.push(`upper(coalesce(${p}area,'')) = $${params.length}`);
-    }
-    return;
-  }
-
-  // Técnicos u otros roles no globales conservan visibilidad por sucursal.
-  // No se filtra por área porque mantenimiento atiende varias áreas dentro de su sucursal.
-  if(sucursalUsuario){
-    params.push(norm(sucursalUsuario));
+  // Usuarios normales ven activos/herramientas de TODA su sucursal.
+  // No se filtra por área porque el Excel puede traer áreas como PRODUCCION,
+  // TOOL CRIB, TALLER, etc. y si no coincide exacto, no aparece el listado.
+  if(clean(user.sucursal)){
+    params.push(norm(user.sucursal));
     clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`);
   }
 }
@@ -143,7 +124,26 @@ function addTicketVisibilityClauses(user, params, clauses, alias=''){
     return;
   }
 
-  // Gerente / mantenimiento / admin conservan la vista global permitida.
+  // Admin, gerente y mantenimiento conservan vista global.
+  if(!user || isGlobalUser(user)) return;
+
+  // MEJORA AUTORIZADA:
+  // Tickets/reportes para usuarios de área/operaciones se separan por sucursal + área.
+  // La comparación usa norm(), por eso BANDA NEGRA, Banda Negra o banda negra se toman igual.
+  if(['operaciones','usuario_area','usuario'].includes(role)){
+    if(clean(user.sucursal)){
+      params.push(norm(user.sucursal));
+      clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`);
+    }
+    if(clean(user.area_asignada)){
+      params.push(norm(user.area_asignada));
+      clauses.push(`upper(coalesce(${p}area,'')) = $${params.length}`);
+    }
+    return;
+  }
+
+  // Otros roles no globales se limitan solo por sucursal.
+  // Esto mantiene que mantenimiento local pueda atender varias áreas de su sucursal.
   addScopedClauses(user, params, clauses, alias);
 }
 
@@ -705,24 +705,11 @@ app.get('/api/users', requireAdmin, async (req,res)=>{
 app.post('/api/users', requireAdmin, async (req,res)=>{
   try{
     const u=req.body;
-
-    // La contraseña NO se normaliza ni se cambia a mayúsculas/minúsculas.
-    // Se guarda exactamente como la escriba el administrador.
     const pass=String(u.password || 'Temp1234');
-    const username = clean(u.username);
-    const role = clean(u.role || 'operaciones').toLowerCase();
-    const esUsuarioArea = ['operaciones','usuario_area','usuario'].includes(role);
-
-    if(!username) return res.status(400).json({error:'Usuario es obligatorio.'});
+    if(!clean(u.username) || !clean(u.name)) return res.status(400).json({error:'Usuario y nombre son obligatorios.'});
     if(pass.length < 6) return res.status(400).json({error:'La contraseña debe tener mínimo 6 caracteres.'});
 
-    // Para usuarios de área, el nombre puede ser el mismo usuario.
-    // Esto evita capturar datos repetidos cuando se crea Banda Negra, Corte, Grapado, etc.
-    const name = esUsuarioArea ? (clean(u.name) || username) : (clean(u.name) || username);
-
-    if(esUsuarioArea && !clean(u.sucursal)) return res.status(400).json({error:'Sucursal es obligatoria para usuario de área.'});
-    if(esUsuarioArea && !clean(u.area_asignada)) return res.status(400).json({error:'Área es obligatoria para usuario de área.'});
-
+    const role = clean(u.role || 'operaciones').toLowerCase();
     const canExport = Boolean(u.can_export) || role === 'gerente' || role === 'admin';
     const hash=await bcrypt.hash(pass,12);
 
@@ -732,20 +719,9 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
         area_asignada,sucursal,telefono,correo,can_export
       ) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9,$10)
       returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo
-    `,[
-      esUsuarioArea ? '' : clean(u.numero_empleado),
-      name,
-      username,
-      hash,
-      role,
-      clean(u.area_asignada),
-      clean(u.sucursal),
-      esUsuarioArea ? '' : clean(u.telefono),
-      esUsuarioArea ? '' : clean(u.correo),
-      canExport
-    ]);
+    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo),canExport]);
 
-    await logAction(req.session.user.id, 'create_user', {username:u.username, role, sucursal:u.sucursal, area_asignada:u.area_asignada});
+    await logAction(req.session.user.id, 'create_user', {username:u.username});
     res.json(r.rows[0]);
   }catch(err){
     console.error('Error creando usuario:', err);
