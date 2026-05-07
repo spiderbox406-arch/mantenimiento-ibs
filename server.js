@@ -162,22 +162,70 @@ function secondsBetween(a, b){
   return Math.max(0, Math.round((end - start) / 1000));
 }
 function calcTicketTimes(t, nowDate = new Date()){
-  const creado = t.creado ? new Date(t.creado) : null;
-  const liberado = t.liberado ? new Date(t.liberado) : null;
-  const iniciado = t.iniciado ? new Date(t.iniciado) : null;
-  const terminado = t.terminado ? new Date(t.terminado) : null;
-  const totalEnd = liberado || nowDate;
-  const mttoEnd = terminado || (t.estado === 'En atención' ? nowDate : null);
-  const muertoTotalMin = creado ? minutesBetween(creado, totalEnd) : 0;
-  const mttoMin = iniciado && mttoEnd ? minutesBetween(iniciado, mttoEnd) : 0;
-  const esperaInicioMin = creado ? (iniciado ? minutesBetween(creado, iniciado) : minutesBetween(creado, nowDate)) : 0;
-  const esperaValidacionMin = terminado ? minutesBetween(terminado, liberado || nowDate) : 0;
-  const produccionMin = Math.max(0, muertoTotalMin - mttoMin);
-  return { mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin };
+  // Flujo autorizado:
+  // MTTO inicia desde que se crea el ticket y sigue hasta que el técnico libera/entrega.
+  // Operaciones inicia cuando el técnico libera/entrega y termina cuando Operaciones libera o devuelve.
+  // Si Operaciones devuelve, ese tramo queda en Operaciones y MTTO vuelve a sumar desde la devolución.
+  const now = nowDate instanceof Date ? nowDate : new Date(nowDate);
+
+  let mttoSeg = Number(t.mtto_seg || 0);
+  let prodSeg = Number(t.produccion_seg || 0);
+
+  const estado = String(t.estado || '');
+  const mttoAbierto = t.mtto_inicio_actual || ((!t.mtto_seg && ['Reportado','Asignado','En atención','Devuelto'].includes(estado)) ? t.creado : null);
+  const opAbierto = t.operacion_inicio_actual || ((!t.produccion_seg && estado === 'Pendiente validación') ? t.terminado : null);
+
+  if(['Reportado','Asignado','En atención','Devuelto'].includes(estado) && mttoAbierto){
+    mttoSeg += secondsBetween(mttoAbierto, now);
+  }
+
+  if(estado === 'Pendiente validación' && opAbierto){
+    prodSeg += secondsBetween(opAbierto, now);
+  }
+
+  let muertoTotalSeg = Number(t.total_muerto_seg || 0) || (mttoSeg + prodSeg);
+
+  // Respaldo para tickets viejos guardados antes de esta lógica de tramos.
+  if(!muertoTotalSeg && t.creado && t.liberado){
+    muertoTotalSeg = secondsBetween(t.creado, t.liberado);
+  }
+  if(!mttoSeg && t.iniciado && t.terminado){
+    mttoSeg = secondsBetween(t.iniciado, t.terminado);
+  }
+  if(!prodSeg && muertoTotalSeg && mttoSeg){
+    prodSeg = Math.max(0, muertoTotalSeg - mttoSeg);
+  }
+
+  const mttoMin = Math.floor(mttoSeg / 60);
+  const produccionMin = Math.floor(prodSeg / 60);
+  const muertoTotalMin = Math.floor(muertoTotalSeg / 60);
+
+  return {
+    mttoMin,
+    produccionMin,
+    muertoTotalMin,
+    esperaInicioMin: mttoMin,
+    esperaValidacionMin: produccionMin,
+    mttoSeg,
+    produccionSeg: prodSeg,
+    muertoTotalSeg
+  };
 }
 function decorateTicket(t){
   const tiempos = calcTicketTimes(t);
   return {...t, responsableActual:t.tecnico_username || '', tiempos};
+}
+
+async function registrarTramoTiempo(clientOrPool, ticketId, tipo, inicio, fin, segundos, origen, usuarioId, nota = ''){
+  if(!ticketId || !tipo || !inicio || !fin || !Number.isFinite(Number(segundos)) || Number(segundos) < 0) return;
+  try{
+    await clientOrPool.query(`
+      insert into ticket_time_events(ticket_id, tipo, inicio, fin, segundos, minutos, origen, usuario_id, nota)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    `,[String(ticketId), tipo, inicio, fin, Math.floor(Number(segundos)), Math.floor(Number(segundos)/60), origen || '', usuarioId || null, nota || '']);
+  }catch(e){
+    console.error('registrarTramoTiempo', e.message);
+  }
 }
 
 async function initDb(){
@@ -265,6 +313,20 @@ async function initDb(){
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now()
     );
+
+    create table if not exists ticket_time_events(
+      id bigserial primary key,
+      ticket_id text not null,
+      tipo text not null,
+      inicio timestamptz not null,
+      fin timestamptz not null,
+      segundos int not null default 0,
+      minutos int not null default 0,
+      origen text,
+      usuario_id bigint references users(id),
+      nota text,
+      created_at timestamptz not null default now()
+    );
   `);
 
   // Migraciones seguras para bases Neon existentes
@@ -306,6 +368,8 @@ async function initDb(){
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS produccion_seg int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS total_muerto_seg int DEFAULT 0;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS total_muerto_min int DEFAULT 0;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS mtto_inicio_actual timestamptz;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS operacion_inicio_actual timestamptz;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_reporte jsonb NOT NULL DEFAULT '[]'::jsonb;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS fotos_trabajo jsonb NOT NULL DEFAULT '[]'::jsonb;
 
@@ -323,6 +387,29 @@ async function initDb(){
     UPDATE tickets
     SET estado = 'Reportado'
     WHERE estado IS NULL OR trim(estado) = '';
+  `);
+
+  // Migración segura de tiempos para tickets existentes.
+  // No borra datos: solo abre el tramo correcto cuando todavía no hay acumulados.
+  await pool.query(`
+    UPDATE tickets
+    SET mtto_inicio_actual = creado
+    WHERE mtto_inicio_actual IS NULL
+      AND estado IN ('Reportado','Asignado','En atención','Devuelto')
+      AND liberado IS NULL;
+
+    UPDATE tickets
+    SET operacion_inicio_actual = terminado
+    WHERE operacion_inicio_actual IS NULL
+      AND estado = 'Pendiente validación'
+      AND terminado IS NOT NULL
+      AND liberado IS NULL;
+
+    UPDATE tickets
+    SET total_muerto_seg = coalesce(mtto_seg,0) + coalesce(produccion_seg,0),
+        total_muerto_min = floor((coalesce(mtto_seg,0) + coalesce(produccion_seg,0)) / 60.0)::int
+    WHERE estado = 'Liberado'
+      AND coalesce(total_muerto_seg,0) = 0;
   `);
 
 
@@ -885,9 +972,10 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
         tipo_falla,
         estado,
         created_by,
-        fotos_reporte
+        fotos_reporte,
+        mtto_inicio_actual
       )
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Reportado',$12,$13)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Reportado',$12,$13,now())
       RETURNING *
     `, [
       clean(t.activo),
@@ -951,7 +1039,7 @@ app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{
     if(!canWorkTicket(req.session.user, t)) return res.status(403).json({error:'Solo el técnico asignado, gerente, mantenimiento o admin puede aceptar este trabajo.'});
 
     const r = await pool.query(
-      "update tickets set estado='En atención', iniciado=coalesce(iniciado,now()) where id=$1 returning *",
+      "update tickets set estado='En atención', iniciado=coalesce(iniciado,now()), mtto_inicio_actual=coalesce(mtto_inicio_actual, creado, now()) where id=$1 returning *",
       [req.params.id]
     );
     await logAction(req.session.user.id,'start_ticket',{id:req.params.id});
@@ -973,8 +1061,12 @@ app.post('/api/tickets/:id/terminar', requireLogin, uploadImages.array('fotos_tr
     const fotosTrabajo = (req.files || []).map(f => '/uploads/' + f.filename);
     const terminado = new Date();
 
-    const mttoSeg = secondsBetween(t.iniciado, terminado);
+    const inicioTramoMtto = t.mtto_inicio_actual || t.creado || t.iniciado;
+    const tramoMttoSeg = secondsBetween(inicioTramoMtto, terminado);
+    const mttoSeg = Number(t.mtto_seg || 0) + tramoMttoSeg;
     const mttoMin = Math.floor(mttoSeg / 60);
+    const prodSegActual = Number(t.produccion_seg || 0);
+    const totalSeg = mttoSeg + prodSegActual;
 
     const up = await pool.query(`
       UPDATE tickets
@@ -985,8 +1077,14 @@ app.post('/api/tickets/:id/terminar', requireLogin, uploadImages.array('fotos_tr
         solucion=$3,
         mtto_seg=$4,
         mtto_min=$5,
-        fotos_trabajo=coalesce(fotos_trabajo,'[]'::jsonb) || $6::jsonb
-      WHERE id=$7
+        produccion_seg=$6,
+        produccion_min=$7,
+        total_muerto_seg=$8,
+        total_muerto_min=$9,
+        mtto_inicio_actual=null,
+        operacion_inicio_actual=$1,
+        fotos_trabajo=coalesce(fotos_trabajo,'[]'::jsonb) || $10::jsonb
+      WHERE id=$11
       RETURNING *
     `, [
       terminado,
@@ -994,11 +1092,16 @@ app.post('/api/tickets/:id/terminar', requireLogin, uploadImages.array('fotos_tr
       clean(req.body.solucion),
       mttoSeg,
       mttoMin,
+      prodSegActual,
+      Math.floor(prodSegActual / 60),
+      totalSeg,
+      Math.floor(totalSeg / 60),
       JSON.stringify(fotosTrabajo),
       req.params.id
     ]);
 
-    await logAction(req.session.user.id,'finish_ticket',{id:req.params.id, mttoSeg, mttoMin});
+    await registrarTramoTiempo(pool, req.params.id, 'MTTO', inicioTramoMtto, terminado, tramoMttoSeg, 'tecnico_libera', req.session.user.id, 'Tramo de mantenimiento cerrado por técnico');
+    await logAction(req.session.user.id,'finish_ticket',{id:req.params.id, tramoMttoSeg, mttoSeg, mttoMin});
     if(up.rows[0] && typeof notifyTicketFinished === 'function') await notifyTicketFinished(up.rows[0]);
 
     res.json({ok:true, ticket:up.rows[0]});
@@ -1020,14 +1123,11 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
 
     const liberado = new Date();
 
-    const mttoSeg = Number(t.mtto_seg || secondsBetween(t.iniciado, t.terminado));
-
-    // Producción/Operaciones = espera antes de que MTTO acepte + espera de liberación
-    const esperaInicioSeg = secondsBetween(t.creado, t.iniciado);
-    const esperaLiberacionSeg = secondsBetween(t.terminado, liberado);
-    const prodSeg = esperaInicioSeg + esperaLiberacionSeg;
-
-    const totalSeg = secondsBetween(t.creado, liberado);
+    const mttoSeg = Number(t.mtto_seg || 0);
+    const inicioTramoOp = t.operacion_inicio_actual || t.terminado;
+    const tramoOpSeg = secondsBetween(inicioTramoOp, liberado);
+    const prodSeg = Number(t.produccion_seg || 0) + tramoOpSeg;
+    const totalSeg = mttoSeg + prodSeg;
 
     const mttoMin = Math.floor(mttoSeg / 60);
     const prodMin = Math.floor(prodSeg / 60);
@@ -1043,7 +1143,9 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
         produccion_seg=$4,
         produccion_min=$5,
         total_muerto_seg=$6,
-        total_muerto_min=$7
+        total_muerto_min=$7,
+        mtto_inicio_actual=null,
+        operacion_inicio_actual=null
       WHERE id=$8
       RETURNING *
     `, [
@@ -1057,7 +1159,8 @@ app.post('/api/tickets/:id/liberar', requireLogin, async (req,res)=>{
       req.params.id
     ]);
 
-    await logAction(req.session.user.id,'release_ticket',{id:req.params.id, mttoSeg, prodSeg, totalSeg});
+    await registrarTramoTiempo(pool, req.params.id, 'OPERACIONES', inicioTramoOp, liberado, tramoOpSeg, 'operacion_libera', req.session.user.id, 'Operaciones libera definitivamente');
+    await logAction(req.session.user.id,'release_ticket',{id:req.params.id, mttoSeg, tramoOpSeg, prodSeg, totalSeg});
     if(up.rows[0] && typeof notifyTicketReleased === 'function') await notifyTicketReleased(up.rows[0]);
 
     res.json({ok:true, ticket:decorateTicket(up.rows[0])});
@@ -1076,8 +1179,28 @@ app.post('/api/tickets/:id/devolver', requireLogin, async (req,res)=>{
       return res.status(403).json({error:'Solo el usuario/área que reportó o el administrador puede devolver este equipo.'});
     }
 
-    await pool.query("update tickets set estado='Devuelto' where id=$1",[req.params.id]);
-    await logAction(req.session.user.id,'return_ticket',{id:req.params.id});
+    const devuelto = new Date();
+    const inicioTramoOp = t.operacion_inicio_actual || t.terminado;
+    const tramoOpSeg = secondsBetween(inicioTramoOp, devuelto);
+    const prodSeg = Number(t.produccion_seg || 0) + tramoOpSeg;
+    const mttoSeg = Number(t.mtto_seg || 0);
+    const totalSeg = mttoSeg + prodSeg;
+
+    await pool.query(`
+      update tickets
+      set
+        estado='Devuelto',
+        produccion_seg=$1,
+        produccion_min=$2,
+        total_muerto_seg=$3,
+        total_muerto_min=$4,
+        mtto_inicio_actual=$5,
+        operacion_inicio_actual=null
+      where id=$6
+    `,[prodSeg, Math.floor(prodSeg/60), totalSeg, Math.floor(totalSeg/60), devuelto, req.params.id]);
+
+    await registrarTramoTiempo(pool, req.params.id, 'OPERACIONES', inicioTramoOp, devuelto, tramoOpSeg, 'operacion_devuelve', req.session.user.id, 'Operaciones devuelve el equipo a mantenimiento');
+    await logAction(req.session.user.id,'return_ticket',{id:req.params.id, tramoOpSeg, prodSeg});
     res.json({ok:true});
   }catch(err){
     console.error('Error devolviendo ticket:', err);
@@ -1115,29 +1238,124 @@ app.get('/api/reportes', requireLogin, async (req,res)=>{
   res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado, porArea, porTipoFalla, porSucursal, porActivo, porTecnico });
 });
 app.get('/api/export/excel', requireCanExport, async (req,res)=>{
-  const params=[]; const clauses=[]; addTicketVisibilityClauses(req.session.user, params, clauses); const where = buildWhere(clauses);
+  const params=[]; const clauses=[];
+  addTicketVisibilityClauses(req.session.user, params, clauses);
+  const where = buildWhere(clauses);
+
+  const tramoParams=[]; const tramoClauses=[];
+  addTicketVisibilityClauses(req.session.user, tramoParams, tramoClauses, 't');
+  const tramoWhere = buildWhere(tramoClauses);
+
   const assetParams=[]; const assetClauses=[];
   addScopedClauses(req.session.user, assetParams, assetClauses);
   const assetWhere = buildWhere(assetClauses);
 
-  const [tickets, activos, users] = await Promise.all([
+  const [tickets, activos, users, tramos] = await Promise.all([
     pool.query(`select * from tickets ${where} order by creado desc`, params),
     pool.query(isGlobalUser(req.session.user) ? 'select * from activos order by numero' : `select * from activos ${assetWhere} order by numero`, assetParams),
-    pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name')
+    pool.query('select id,numero_empleado,name,username,role,status,area_asignada,sucursal,telefono,correo,created_at from users order by name'),
+    pool.query(`
+      select
+        e.id,
+        e.ticket_id,
+        e.tipo,
+        e.inicio,
+        e.fin,
+        e.segundos,
+        e.minutos,
+        e.origen,
+        e.usuario_id,
+        e.nota,
+        e.created_at,
+        t.activo,
+        t.activo_descripcion,
+        t.area,
+        t.sucursal,
+        t.estado,
+        t.tecnico_username,
+        t.solicitante
+      from ticket_time_events e
+      join tickets t on t.id::text = e.ticket_id
+      ${tramoWhere}
+      order by e.inicio desc
+    `, tramoParams)
   ]);
+
   const wb=XLSX.utils.book_new();
   const ticketRows = tickets.rows.map(t => {
     const tiempos = calcTicketTimes(t);
     return {
-      ...t,
-      tiempo_muerto_total_min: tiempos.muertoTotalMin,
+      ticket_id: t.id,
+      activo: t.activo,
+      descripcion: t.activo_descripcion,
+      area: t.area,
+      sucursal: t.sucursal,
+      ubicacion: t.ubicacion,
+      solicitante: t.solicitante,
+      empleado_solicitante: t.empleado_solicitante,
+      telefono_solicitante: t.telefono_solicitante,
+      prioridad: t.prioridad,
+      tipo_falla: t.tipo_falla,
+      estado: t.estado,
+      tecnico_username: t.tecnico_username,
+      falla: t.falla,
+      diagnostico: t.diagnostico,
+      solucion: t.solucion,
+      creado: t.creado,
+      asignado: t.asignado,
+      iniciado: t.iniciado,
+      terminado_tecnico: t.terminado,
+      liberado_operaciones: t.liberado,
+      mtto_inicio_actual: t.mtto_inicio_actual,
+      operacion_inicio_actual: t.operacion_inicio_actual,
+      tiempo_mtto_seg: tiempos.mttoSeg,
       tiempo_mtto_min: tiempos.mttoMin,
-      tiempo_produccion_min: tiempos.produccionMin,
-      espera_inicio_min: tiempos.esperaInicioMin,
-      espera_validacion_min: tiempos.esperaValidacionMin
+      tiempo_operaciones_seg: tiempos.produccionSeg,
+      tiempo_operaciones_min: tiempos.produccionMin,
+      tiempo_muerto_total_seg: tiempos.muertoTotalSeg,
+      tiempo_muerto_total_min: tiempos.muertoTotalMin,
+      fotos_reporte: JSON.stringify(t.fotos_reporte || []),
+      fotos_trabajo: JSON.stringify(t.fotos_trabajo || [])
     };
   });
+
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(ticketRows), 'Tickets');
+
+  const tramoRows = tramos.rows.map(e => ({
+    ticket_id: e.ticket_id,
+    tipo: e.tipo,
+    inicio: e.inicio,
+    fin: e.fin,
+    segundos: e.segundos,
+    minutos: e.minutos,
+    origen: e.origen,
+    nota: e.nota,
+    usuario_id: e.usuario_id,
+    activo: e.activo,
+    descripcion: e.activo_descripcion,
+    area: e.area,
+    sucursal: e.sucursal,
+    estado_ticket: e.estado,
+    tecnico_username: e.tecnico_username,
+    solicitante: e.solicitante,
+    creado_en: e.created_at
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(tramoRows), 'Tramos_Tiempos');
+
+  const graficaRows = ticketRows.map(t => ({
+    ticket_id: t.ticket_id,
+    activo: t.activo,
+    area: t.area,
+    sucursal: t.sucursal,
+    tipo_falla: t.tipo_falla,
+    estado: t.estado,
+    tecnico_username: t.tecnico_username,
+    mtto_min: t.tiempo_mtto_min,
+    operaciones_min: t.tiempo_operaciones_min,
+    total_min: t.tiempo_muerto_total_min
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(graficaRows), 'Base_Graficas');
+
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(activos.rows), 'Activos');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users.rows), 'Usuarios');
   const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});
