@@ -55,6 +55,42 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 function clean(v){ return String(v ?? '').trim(); }
 function norm(v){ return clean(v).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+function normKey(v){ return norm(v).replace(/[^A-Z0-9]/g, ''); }
+const AREA_ALIASES = new Map([
+  ['BN','BANDA NEGRA'], ['BANDANEGRA','BANDA NEGRA'], ['NEGRA','BANDA NEGRA'],
+  ['BL','BANDA LIGERA'], ['BANDALIGERA','BANDA LIGERA'], ['LIGERA','BANDA LIGERA'],
+  ['BM','BANDAS MODULARES'], ['BANDAMODULAR','BANDAS MODULARES'], ['BANDASMODULARES','BANDAS MODULARES'],
+  ['MTTO','MANTENIMIENTO'], ['MANTO','MANTENIMIENTO'], ['MANTENIMIENTO','MANTENIMIENTO'],
+  ['PROD','PRODUCCION'], ['PRODUCCIÓN','PRODUCCION'], ['PRODUCCION','PRODUCCION'],
+  ['CALIDAD','CALIDAD'], ['TERMINADO','TERMINADO'], ['CORTE','CORTE']
+]);
+const SUCURSAL_ALIASES = new Map([
+  ['CHIH','CHIHUAHUA'], ['CHIHUAHUA','CHIHUAHUA'], ['MATRIZ','CHIHUAHUA'], ['IBSCHIHUAHUA','CHIHUAHUA']
+]);
+function canonicalArea(v){
+  const value = clean(v);
+  if(!value) return '';
+  const key = normKey(value);
+  return AREA_ALIASES.get(key) || norm(value);
+}
+function canonicalSucursal(v){
+  const value = clean(v);
+  if(!value) return '';
+  const key = normKey(value);
+  return SUCURSAL_ALIASES.get(key) || norm(value);
+}
+function uniqueSorted(values){
+  const map = new Map();
+  for(const v of values){
+    const c = clean(v);
+    if(!c) continue;
+    const k = normKey(c);
+    if(!k) continue;
+    if(!map.has(k)) map.set(k, norm(c));
+  }
+  return [...map.values()].sort((a,b)=>a.localeCompare(b,'es'));
+}
+
 const DEMO_USERNAMES = ['demo','test','usuario','prueba','operador','operaciones_demo','demo_area','area_demo','user_demo'];
 const MATRIZ_SUCURSAL = 'CHIHUAHUA';
 function sameKey(a,b){ return norm(a) === norm(b); }
@@ -545,6 +581,24 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
   res.json({activos:a.rows, empleados, empleados_reportantes:er.rows, tecnicos:t.rows, gerentes:g.rows});
 });
 
+
+app.get('/api/catalogos', requireLogin, async (req,res)=>{
+  try{
+    const r = await pool.query(`
+      select sucursal, area from activos
+      union all select sucursal, area_asignada as area from users
+      union all select sucursal, area from empleados_reportantes
+      union all select sucursal, area from tickets
+    `);
+    const sucursales = uniqueSorted(r.rows.map(x => canonicalSucursal(x.sucursal || '')));
+    const areas = uniqueSorted(r.rows.map(x => canonicalArea(x.area || '')));
+    res.json({sucursales, areas});
+  }catch(err){
+    console.error('Error catalogos:', err);
+    res.status(500).json({error:err.message});
+  }
+});
+
 app.get('/api/activos', requireLogin, async (req,res)=>{
   const q = norm(req.query.q || '');
   const params = [];
@@ -562,7 +616,7 @@ app.post('/api/activos', requireAdmin, async (req,res)=>{
   const r = await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
     on conflict(numero) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()
-    returning *`, [clean(a.numero),clean(a.descripcion),clean(a.area),clean(a.tipo),clean(a.sucursal || 'SIN SUCURSAL'),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
+    returning *`, [clean(a.numero),clean(a.descripcion),canonicalArea(a.area),clean(a.tipo),canonicalSucursal(a.sucursal || 'SIN SUCURSAL'),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
   await logAction(req.session.user.id, 'upsert_asset', {numero:a.numero});
   res.json(r.rows[0]);
 });
@@ -639,9 +693,9 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
     `,[
       a.numero,
       a.descripcion,
-      a.area,
+      canonicalArea(a.area),
       a.tipo,
-      a.sucursal || 'SIN SUCURSAL',
+      canonicalSucursal(a.sucursal || 'SIN SUCURSAL'),
       a.ubicacion,
       a.marca,
       a.modelo,
@@ -719,7 +773,7 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
         area_asignada,sucursal,telefono,correo,can_export
       ) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9,$10)
       returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo
-    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo),canExport]);
+    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,canonicalArea(u.area_asignada),canonicalSucursal(u.sucursal),clean(u.telefono),clean(u.correo),canExport]);
 
     await logAction(req.session.user.id, 'create_user', {username:u.username});
     res.json(r.rows[0]);
@@ -740,7 +794,7 @@ app.post('/api/users/cleanup-demos', requireAdmin, async (req,res)=>{
 app.put('/api/users/:id', requireAdmin, async (req,res)=>{
   const u=req.body;
   const r=await pool.query(`update users set numero_empleado=$1,name=$2,username=lower($3),role=$4,status=$5,area_asignada=$6,sucursal=$7,telefono=$8,correo=$9,can_export=$10,updated_at=now() where id=$11 returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo`,
-    [clean(u.numero_empleado),clean(u.name),clean(u.username),clean(u.role),clean(u.status),clean(u.area_asignada),clean(u.sucursal),clean(u.telefono),clean(u.correo),Boolean(u.can_export),req.params.id]);
+    [clean(u.numero_empleado),clean(u.name),clean(u.username),clean(u.role),clean(u.status),canonicalArea(u.area_asignada),canonicalSucursal(u.sucursal),clean(u.telefono),clean(u.correo),Boolean(u.can_export),req.params.id]);
   await logAction(req.session.user.id, 'update_user', {id:req.params.id});
   res.json(r.rows[0]);
 });
