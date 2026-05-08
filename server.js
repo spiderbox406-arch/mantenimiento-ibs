@@ -65,7 +65,9 @@ const AREA_ALIASES = new Map([
   ['CALIDAD','CALIDAD'], ['TERMINADO','TERMINADO'], ['CORTE','CORTE']
 ]);
 const SUCURSAL_ALIASES = new Map([
-  ['CHIH','CHIHUAHUA'], ['CHIHUAHUA','CHIHUAHUA'], ['MATRIZ','CHIHUAHUA'], ['IBSCHIHUAHUA','CHIHUAHUA']
+  ['CHIH','CHIHUAHUA'], ['CHIHUAHUA','CHIHUAHUA'], ['CHIH.','CHIHUAHUA'], ['CUU','CHIHUAHUA'], ['MATRIZ','CHIHUAHUA'], ['IBSCHIHUAHUA','CHIHUAHUA'], ['PLANTACHIHUAHUA','CHIHUAHUA'],
+  ['JRZ','JUAREZ'], ['JUAREZ','JUAREZ'], ['JUÁREZ','JUAREZ'], ['CDJUAREZ','JUAREZ'], ['CIUDADJUAREZ','JUAREZ'], ['IBSJUAREZ','JUAREZ'],
+  ['TORREON','TORREON'], ['TORREÓN','TORREON'], ['TRC','TORREON'], ['IBSTORREON','TORREON']
 ]);
 function canonicalArea(v){
   const value = clean(v);
@@ -289,7 +291,7 @@ async function initDb(){
       id bigserial primary key,
       numero_empleado text,
       name text not null,
-      username text not null unique,
+      username text not null,
       password_hash text not null,
       role text not null default 'operaciones',
       status text not null default 'activo',
@@ -306,7 +308,7 @@ async function initDb(){
     );
     create table if not exists activos(
       id bigserial primary key,
-      numero text not null unique,
+      numero text not null,
       descripcion text not null,
       area text,
       tipo text,
@@ -438,6 +440,24 @@ async function initDb(){
     ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'activo';
   `);
 
+  // MEJORA AUTORIZADA: usuarios y activos pueden repetirse en diferentes sucursales.
+  // Se elimina el UNIQUE global viejo y se crea UNIQUE por sucursal.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_username_key') THEN
+        ALTER TABLE users DROP CONSTRAINT users_username_key;
+      END IF;
+      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'activos_numero_key') THEN
+        ALTER TABLE activos DROP CONSTRAINT activos_numero_key;
+      END IF;
+    END $$;
+    CREATE UNIQUE INDEX IF NOT EXISTS users_username_sucursal_uidx
+      ON users (lower(username), sucursal);
+    CREATE UNIQUE INDEX IF NOT EXISTS activos_numero_sucursal_uidx
+      ON activos (numero, sucursal);
+  `);
+
   await pool.query(`
     UPDATE tickets
     SET estado = 'Reportado'
@@ -521,10 +541,18 @@ app.get('/api/me', (req,res)=> res.json({user:req.session.user || null}));
 app.post('/api/login', async (req,res)=>{
   const username = clean(req.body.username).toLowerCase();
   const password = String(req.body.password || '');
-  if(!username || !password) return res.status(400).json({error:'Usuario y contraseña son obligatorios.'});
-  const r = await pool.query('select * from users where lower(username)=lower($1)', [username]);
+  const sucursal = canonicalSucursal(req.body.sucursal || '');
+  if(!username || !password || !sucursal) return res.status(400).json({error:'Usuario, contraseña y sucursal son obligatorios.'});
+
+  let r = await pool.query("select * from users where lower(username)=lower($1) and coalesce(sucursal,'')=$2 limit 1", [username, sucursal]);
+
+  // Respaldo seguro para admin viejo sin sucursal configurada.
+  if(r.rows.length === 0 && username === 'admin'){
+    r = await pool.query('select * from users where lower(username)=lower($1) limit 1', [username]);
+  }
+
   const user = r.rows[0];
-  if(!user) return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
+  if(!user) return res.status(401).json({error:'Usuario, contraseña o sucursal incorrectos.'});
   if(user.status !== 'activo') return res.status(403).json({error:'Usuario inactivo. Contacta al administrador.'});
   if(user.locked_until && new Date(user.locked_until) > new Date()) return res.status(423).json({error:'Usuario bloqueado temporalmente por intentos fallidos.'});
   const ok = await bcrypt.compare(password, user.password_hash);
@@ -532,11 +560,11 @@ app.post('/api/login', async (req,res)=>{
     const attempts = (user.failed_login_attempts || 0) + 1;
     const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15*60*1000) : null;
     await pool.query('update users set failed_login_attempts=$1, locked_until=$2 where id=$3', [attempts, lockedUntil, user.id]);
-    return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
+    return res.status(401).json({error:'Usuario, contraseña o sucursal incorrectos.'});
   }
   await pool.query('update users set failed_login_attempts=0, locked_until=null where id=$1', [user.id]);
   req.session.user = publicUser(user);
-  await logAction(user.id, 'login', {username});
+  await logAction(user.id, 'login', {username, sucursal});
   res.json({user:req.session.user});
 });
 app.post('/api/logout', requireLogin, async (req,res)=>{ const uid=req.session.user.id; req.session.destroy(()=>{}); await logAction(uid,'logout'); res.json({ok:true}); });
@@ -615,7 +643,7 @@ app.post('/api/activos', requireAdmin, async (req,res)=>{
   const search = norm([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
   const r = await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-    on conflict(numero) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()
+    on conflict(numero,sucursal) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()
     returning *`, [clean(a.numero),clean(a.descripcion),canonicalArea(a.area),clean(a.tipo),canonicalSucursal(a.sucursal || 'SIN SUCURSAL'),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
   await logAction(req.session.user.id, 'upsert_asset', {numero:a.numero});
   res.json(r.rows[0]);
@@ -678,7 +706,7 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
       insert into activos(
         numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text
       ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      on conflict(numero) do update set
+      on conflict(numero,sucursal) do update set
         descripcion=excluded.descripcion,
         area=excluded.area,
         tipo=excluded.tipo,
@@ -764,6 +792,12 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
     if(pass.length < 6) return res.status(400).json({error:'La contraseña debe tener mínimo 6 caracteres.'});
 
     const role = clean(u.role || 'operaciones').toLowerCase();
+    const sucursal = canonicalSucursal(u.sucursal);
+    if(!sucursal) return res.status(400).json({error:'Selecciona la sucursal del usuario.'});
+    const areaAsignada = canonicalArea(u.area_asignada);
+    if(['operaciones','usuario_area','usuario'].includes(role) && !areaAsignada) return res.status(400).json({error:'Selecciona el área del usuario.'});
+    const existe = await pool.query('select id from users where lower(username)=lower($1) and sucursal=$2 limit 1', [clean(u.username), sucursal]);
+    if(existe.rows.length) return res.status(400).json({error:'Ese usuario ya existe en esta sucursal. Puedes usarlo en otra sucursal.'});
     const canExport = Boolean(u.can_export) || role === 'gerente' || role === 'admin';
     const hash=await bcrypt.hash(pass,12);
 
@@ -773,13 +807,13 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
         area_asignada,sucursal,telefono,correo,can_export
       ) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9,$10)
       returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo
-    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,canonicalArea(u.area_asignada),canonicalSucursal(u.sucursal),clean(u.telefono),clean(u.correo),canExport]);
+    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,areaAsignada,sucursal,clean(u.telefono),clean(u.correo),canExport]);
 
     await logAction(req.session.user.id, 'create_user', {username:u.username});
     res.json(r.rows[0]);
   }catch(err){
     console.error('Error creando usuario:', err);
-    if(err.code === '23505') return res.status(400).json({error:'Ese usuario ya existe. Usa otro nombre de usuario.'});
+    if(err.code === '23505') return res.status(400).json({error:'Ese usuario o activo ya existe en esta sucursal.'});
     res.status(500).json({error:err.message});
   }
 });
