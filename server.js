@@ -64,10 +64,19 @@ const AREA_ALIASES = new Map([
   ['PROD','PRODUCCION'], ['PRODUCCIÓN','PRODUCCION'], ['PRODUCCION','PRODUCCION'],
   ['CALIDAD','CALIDAD'], ['TERMINADO','TERMINADO'], ['CORTE','CORTE']
 ]);
+const SUCURSALES_BASE = [
+  'CHIHUAHUA','JUAREZ','TORREON','DURANGO','HERMOSILLO','MONTERREY','SALTILLO','CULIACAN','TIJUANA','MEXICALI','OBREGON','GUADALAJARA','MEXICO','QUERETARO','LEON','SAN LUIS POTOSI','PUEBLA','VERACRUZ','MERIDA','TAMPICO'
+];
 const SUCURSAL_ALIASES = new Map([
   ['CHIH','CHIHUAHUA'], ['CHIHUAHUA','CHIHUAHUA'], ['CHIH.','CHIHUAHUA'], ['CUU','CHIHUAHUA'], ['MATRIZ','CHIHUAHUA'], ['IBSCHIHUAHUA','CHIHUAHUA'], ['PLANTACHIHUAHUA','CHIHUAHUA'],
   ['JRZ','JUAREZ'], ['JUAREZ','JUAREZ'], ['JUÁREZ','JUAREZ'], ['CDJUAREZ','JUAREZ'], ['CIUDADJUAREZ','JUAREZ'], ['IBSJUAREZ','JUAREZ'],
-  ['TORREON','TORREON'], ['TORREÓN','TORREON'], ['TRC','TORREON'], ['IBSTORREON','TORREON']
+  ['TORREON','TORREON'], ['TORREÓN','TORREON'], ['TRC','TORREON'], ['IBSTORREON','TORREON'],
+  ['DGO','DURANGO'], ['DURANGO','DURANGO'], ['HMO','HERMOSILLO'], ['HERMOSILLO','HERMOSILLO'], ['MTY','MONTERREY'], ['MONTERREY','MONTERREY'],
+  ['SLW','SALTILLO'], ['SALTILLO','SALTILLO'], ['CLN','CULIACAN'], ['CULIACAN','CULIACAN'], ['CULIACÁN','CULIACAN'],
+  ['TIJ','TIJUANA'], ['TIJUANA','TIJUANA'], ['MXL','MEXICALI'], ['MEXICALI','MEXICALI'], ['OBREGON','OBREGON'], ['OBREGÓN','OBREGON'], ['CDOBREGON','OBREGON'], ['CIUDADOBREGON','OBREGON'],
+  ['GDL','GUADALAJARA'], ['GUADALAJARA','GUADALAJARA'], ['CDMX','MEXICO'], ['MEXICO','MEXICO'], ['MÉXICO','MEXICO'], ['QRO','QUERETARO'], ['QUERETARO','QUERETARO'], ['QUERÉTARO','QUERETARO'],
+  ['LEON','LEON'], ['LEÓN','LEON'], ['SLP','SAN LUIS POTOSI'], ['SANLUISPOTOSI','SAN LUIS POTOSI'], ['SANLUISPOTOSÍ','SAN LUIS POTOSI'],
+  ['PUEBLA','PUEBLA'], ['VERACRUZ','VERACRUZ'], ['MERIDA','MERIDA'], ['MÉRIDA','MERIDA'], ['TAMPICO','TAMPICO']
 ]);
 function canonicalArea(v){
   const value = clean(v);
@@ -538,6 +547,22 @@ app.get('/api/health', async (req,res)=>{
 });
 
 app.get('/api/me', (req,res)=> res.json({user:req.session.user || null}));
+app.get('/api/sucursales-login', async (req,res)=>{
+  try{
+    const r = await pool.query(`
+      select sucursal from users where coalesce(sucursal,'') <> ''
+      union select sucursal from activos where coalesce(sucursal,'') <> ''
+      union select sucursal from empleados_reportantes where coalesce(sucursal,'') <> ''
+      union select sucursal from tickets where coalesce(sucursal,'') <> ''
+    `);
+    const sucursales = uniqueSorted([...SUCURSALES_BASE, ...r.rows.map(x => canonicalSucursal(x.sucursal || ''))]);
+    res.json({sucursales});
+  }catch(err){
+    console.error('Error sucursales-login:', err);
+    res.json({sucursales:SUCURSALES_BASE});
+  }
+});
+
 app.post('/api/login', async (req,res)=>{
   const username = clean(req.body.username).toLowerCase();
   const password = String(req.body.password || '');
