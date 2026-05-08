@@ -22,8 +22,23 @@
 <main id="app"></main>
 <script>
 let me=null, activos=[], empleados=[], empleadosReportantes=[], tecnicos=[], gerentes=[], tickets=[], reportes=null, catalogos={sucursales:[],areas:[]}, vista='panel', selectedAsset=null, selectedReporter=null, editingUserId=null;
-const SUCURSALES_LOGIN=['CHIHUAHUA','JUAREZ','TORREON'];
-function loginSucursalOptions(){return SUCURSALES_LOGIN.map(s=>`<option value="${s}">${s}</option>`).join('');}
+const SUCURSALES_LOGIN_BASE=[
+  'CHIHUAHUA','JUAREZ','TORREON','DURANGO','HERMOSILLO','MONTERREY','SALTILLO','CULIACAN','TIJUANA','MEXICALI','OBREGON','GUADALAJARA','MEXICO','QUERETARO','LEON','SAN LUIS POTOSI','PUEBLA','VERACRUZ','MERIDA','TAMPICO'
+];
+let SUCURSALES_LOGIN=[...SUCURSALES_LOGIN_BASE];
+function loginSucursalOptions(){return SUCURSALES_LOGIN.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');}
+async function cargarSucursalesLogin(){
+  try{
+    const r = await fetch('/api/sucursales-login');
+    if(!r.ok) throw new Error('No se pudieron cargar sucursales');
+    const data = await r.json();
+    const extras = Array.isArray(data.sucursales) ? data.sucursales : [];
+    SUCURSALES_LOGIN = [...new Set([...SUCURSALES_LOGIN_BASE, ...extras].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  }catch(e){
+    SUCURSALES_LOGIN = [...SUCURSALES_LOGIN_BASE];
+  }
+}
+
 const app=document.getElementById('app');
 window.addEventListener('unhandledrejection', ev => {
   try{ hideLoading(); }catch(e){}
@@ -320,7 +335,7 @@ function resetIdleTimer(){
 }
 ['click','mousemove','keypress','touchstart','scroll'].forEach(evt=>window.addEventListener(evt,resetIdleTimer,{passive:true}));
 async function boot(){try{let r=await api('/api/me');me=r.user;if(me){resetIdleTimer();render();}else login()}catch(e){login()}}
-function login(){document.getElementById('mainHeader').style.display='none';app.style.maxWidth='none';app.style.padding='0';app.innerHTML=`<section class="login-page"><div class="login-left"><div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas"></div><h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1><p class="login-subtitle">Control general de tickets, activos, empleados, tiempos muertos y reportes internos por sucursal.</p><div class="machine-strip"><div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Activos industriales</small></div><div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario por sucursal</small></div><div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div><div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Tiempos y reportes</small></div></div></div><div class="login-right"><div class="login-card"><div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div><h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p><label>Usuario</label><input id="u" autocomplete="username" placeholder="Usuario"><label>Contraseña</label><input id="p" type="password" autocomplete="current-password" placeholder="Contraseña"><label>Sucursal</label><select id="loginSucursal"><option value="">Selecciona sucursal</option>${loginSucursalOptions()}</select><button class="btn-orange" onclick="doLogin()">Entrar al sistema</button><div class="login-footer">Interbandas · Mantenimiento IBS<br>Usuarios separados por sucursal</div></div></div></section>`;setTimeout(()=>document.getElementById('u').focus(),50)}
+async function login(){await cargarSucursalesLogin();document.getElementById('mainHeader').style.display='none';app.style.maxWidth='none';app.style.padding='0';app.innerHTML=`<section class="login-page"><div class="login-left"><div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas"></div><h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1><p class="login-subtitle">Control general de tickets, activos, empleados, tiempos muertos y reportes internos por sucursal.</p><div class="machine-strip"><div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Activos industriales</small></div><div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario por sucursal</small></div><div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div><div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Tiempos y reportes</small></div></div></div><div class="login-right"><div class="login-card"><div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div><h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p><label>Usuario</label><input id="u" autocomplete="username" placeholder="Usuario"><label>Contraseña</label><input id="p" type="password" autocomplete="current-password" placeholder="Contraseña"><label>Sucursal</label><select id="loginSucursal"><option value="">Selecciona sucursal</option>${loginSucursalOptions()}</select><button class="btn-orange" onclick="doLogin()">Entrar al sistema</button><div class="login-footer">Interbandas · Mantenimiento IBS<br>Usuarios separados por sucursal</div></div></div></section>`;setTimeout(()=>document.getElementById('u').focus(),50)}
 async function doLogin(){const username=val('u').trim();const password=val('p');const sucursal=val('loginSucursal');if(!username)return alert('Escribe el usuario');if(!password)return alert('Escribe la contraseña');if(!sucursal)return alert('Selecciona la sucursal');showLoading('Iniciando sesión...');try{const r=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,sucursal})});me=r.user;document.getElementById('p').value='';resetIdleTimer();render()}catch(e){alert('No entró: '+e.message)}finally{hideLoading()}}
 async function salir(){try{await api('/api/logout',{method:'POST'})}catch(e){}me=null;selectedAsset=null;login()}
 async function loadAll(){const [b,ts,rs,cat]=await Promise.all([api('/api/bootstrap'),api('/api/tickets'),api('/api/reportes'),api('/api/catalogos')]);activos=b.activos;empleados=b.empleados;empleadosReportantes=b.empleados_reportantes||[];tecnicos=b.tecnicos;gerentes=b.gerentes||[];tickets=ts;reportes=rs;catalogos=cat||{sucursales:[],areas:[]}}
