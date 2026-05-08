@@ -298,10 +298,11 @@ function puedeVerTodoFrontend(){return ['admin','gerente','mantenimiento'].inclu
 function perteneceASucursalArea(row){
   if(!me) return false;
   if(puedeVerTodoFrontend()) return true;
-  if(esUsuarioArea()){
-    return sameLoose(row?.sucursal||'', me.sucursal||'') && sameLoose(row?.area||'', me.area_asignada||'');
-  }
-  if(rolActual()==='tecnico') return !me.sucursal || sameLoose(row?.sucursal||'', me.sucursal||'');
+
+  // ACTIVOS/HERRAMIENTAS:
+  // Aquí se filtra SOLO por sucursal.
+  // No por área, porque el Excel puede traer áreas como TOOL CRIB, TALLER, PRODUCCION, etc.
+  // Si filtramos por área, el panel puede decir "315 activos visibles" pero el buscador no despliega nada.
   return !me.sucursal || sameLoose(row?.sucursal||'', me.sucursal||'');
 }
 function activosVisibles(){return (activos||[]).filter(perteneceASucursalArea)}
@@ -403,8 +404,28 @@ function kpis(){return `<div class="kpis"><div class="kpi"><b>${reportes.totalTi
 function panel(){const rows=ticketsVisibles();return `${kpis()}${crearTicketCard()}${tablaTickets(rows.slice(0,10))}`}
 function assetSearchBlock(){return `<label>Buscar activo / herramienta</label><input id="assetQuery" placeholder="Busca por número, descripción, área, tipo, sucursal, ubicación, marca, usuario o estatus" oninput="assetSuggest(this.value)"><div id="assetResults" class="asset-results" style="display:none"></div><div id="assetSelected">${selectedAsset?selectedAssetHtml(selectedAsset):''}</div>`}
 function selectedAssetHtml(a){return `<div class="selected-asset"><b>${esc(a.numero)}</b> · ${esc(a.descripcion)}<br><span class="pill">Área: ${esc(a.area)}</span><span class="pill">Tipo: ${esc(a.tipo)}</span><span class="pill">Sucursal: ${esc(a.sucursal)}</span><span class="pill">Ubicación: ${esc(a.ubicacion)}</span><span class="pill">Usuario: ${esc(a.usuario)}</span></div>`}
-function assetSuggest(q){const box=document.getElementById('assetResults'); if(!box)return; const nq=normalize(q); if(nq.length<1){box.style.display='none';box.innerHTML='';return} const rows=activosVisibles().filter(a=>normalize([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' ')).includes(nq)).slice(0,25); box.style.display='block'; box.innerHTML=rows.length?rows.map((a,i)=>`<div class="asset-option" onclick="selectAsset(${a.id})"><b>${esc(a.numero)}</b> · ${esc(a.descripcion)}<br><span class="muted">${esc(a.area)} · ${esc(a.tipo)} · ${esc(a.sucursal)} · ${esc(a.ubicacion)} · ${esc(a.usuario)}</span></div>`).join(''):`<div class="asset-option muted">Sin resultados</div>`}
-function selectAsset(id){selectedAsset=activosVisibles().find(a=>String(a.id)===String(id));if(!selectedAsset){alert('Este activo no pertenece a tu sucursal y área.');return;}document.getElementById('assetResults').style.display='none';document.getElementById('assetQuery').value=selectedAsset.numero+' · '+selectedAsset.descripcion;document.getElementById('assetSelected').innerHTML=selectedAssetHtml(selectedAsset)}
+function textoBusquedaActivo(a){
+  return normalize([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
+}
+function coincideBusquedaActivo(a, q){
+  const txt = textoBusquedaActivo(a);
+  const tokens = normalize(q).split(/\s+/).filter(Boolean);
+  if(!tokens.length) return false;
+  // Flexible: no exige que venga la frase exacta junta.
+  // Ejemplo: "pulidor neumatico" encuentra "PULIDOR / LIJADORA NEUMÁTICA".
+  return tokens.every(t => txt.includes(t));
+}
+function assetSuggest(q){
+  const box=document.getElementById('assetResults');
+  if(!box)return;
+  if(normalize(q).trim().length<1){box.style.display='none';box.innerHTML='';return}
+  const rows=activosVisibles().filter(a=>coincideBusquedaActivo(a,q)).slice(0,25);
+  box.style.display='block';
+  box.innerHTML=rows.length
+    ? rows.map((a,i)=>`<div class="asset-option" onclick="selectAsset(${a.id})"><b>${esc(a.numero)}</b> · ${esc(a.descripcion)}<br><span class="muted">${esc(a.area)} · ${esc(a.tipo)} · ${esc(a.sucursal)} · ${esc(a.ubicacion)} · ${esc(a.usuario)}</span></div>`).join('')
+    : `<div class="asset-option muted">Sin resultados en tu sucursal. Prueba con número, marca, ubicación o una sola palabra.</div>`;
+}
+function selectAsset(id){selectedAsset=activosVisibles().find(a=>String(a.id)===String(id));if(!selectedAsset){alert('Este activo no pertenece a tu sucursal.');return;}document.getElementById('assetResults').style.display='none';document.getElementById('assetQuery').value=selectedAsset.numero+' · '+selectedAsset.descripcion;document.getElementById('assetSelected').innerHTML=selectedAssetHtml(selectedAsset)}
 function reportanteSuggest(q){
   const box=document.getElementById('reportanteResults');
   if(!box)return;
