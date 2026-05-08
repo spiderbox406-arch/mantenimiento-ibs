@@ -94,16 +94,23 @@ function sucursalVariants(v){
   const raw = clean(v);
   if(!raw) return [];
   const canon = canonicalSucursal(raw);
-  const set = new Set([norm(raw), norm(canon)]);
+  const set = new Set([normKey(raw), normKey(canon)]);
   const aliases = SUCURSAL_ALIAS_GROUPS[canon] || [];
-  for(const a of aliases) set.add(norm(a));
+  for(const a of aliases) set.add(normKey(a));
   return [...set].filter(Boolean);
+}
+function sqlNormKey(columnSql){
+  // Normaliza en PostgreSQL sin extensiones: quita acentos comunes, espacios, puntos y guiones.
+  return `regexp_replace(upper(translate(coalesce(${columnSql},''),'ÁÉÍÓÚÜÑáéíóúüñ','AEIOUUNAEIOUUN')), '[^A-Z0-9]', '', 'g')`;
 }
 function addSucursalClause(params, clauses, columnSql, sucursalValue){
   const variants = sucursalVariants(sucursalValue);
   if(!variants.length) return;
   params.push(variants);
-  clauses.push(`upper(coalesce(${columnSql},'')) = any($${params.length}::text[])`);
+  clauses.push(`${sqlNormKey(columnSql)} = any($${params.length}::text[])`);
+}
+function canonicalizeRowsSucursal(rows){
+  return (rows || []).map(r => ({...r, sucursal: canonicalSucursal(r.sucursal || '') || r.sucursal || ''}));
 }
 function canonicalArea(v){
   const value = clean(v);
@@ -672,7 +679,7 @@ app.get('/api/bootstrap', requireLogin, async (req,res)=>{
     empleados = e.rows;
   }
 
-  res.json({activos:a.rows, empleados, empleados_reportantes:er.rows, tecnicos:t.rows, gerentes:g.rows});
+  res.json({activos:canonicalizeRowsSucursal(a.rows), empleados:canonicalizeRowsSucursal(empleados), empleados_reportantes:canonicalizeRowsSucursal(er.rows), tecnicos:canonicalizeRowsSucursal(t.rows), gerentes:canonicalizeRowsSucursal(g.rows)});
 });
 
 
@@ -701,7 +708,7 @@ app.get('/api/activos', requireLogin, async (req,res)=>{
   if(q){ params.push('%' + q + '%'); clauses.push(`search_text like $${params.length}`); }
   const where = buildWhere(clauses);
   const r = await pool.query(`select * from activos ${where} order by sucursal, area, numero limit 1000`, params);
-  res.json(r.rows);
+  res.json(canonicalizeRowsSucursal(r.rows));
 });
 app.post('/api/activos', requireAdmin, async (req,res)=>{
   const a = req.body;
