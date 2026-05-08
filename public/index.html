@@ -266,8 +266,32 @@ function sameKey(a,b){return normalize(a)===normalize(b)}
 function esMatriz(s){return sameKey(s,'CHIHUAHUA')}
 function tecnicosParaTicket(t){return tecnicos.filter(x=>sameKey(x.sucursal,t.sucursal)||esMatriz(x.sucursal)||!t.sucursal)}
 function normalize(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+const SUCURSAL_ALIAS_GROUPS_FRONT={
+  'CHIHUAHUA':['CHIH','CHIH.','CHIHUAHUA','CUU','MATRIZ','IBS CHIHUAHUA','PLANTA CHIHUAHUA','SUCURSAL CHIHUAHUA'],
+  'JUAREZ':['JRZ','JUAREZ','JUÁREZ','CD JUAREZ','CD. JUAREZ','CIUDAD JUAREZ','CIUDAD JUÁREZ','SUCURSAL JUAREZ'],
+  'TIJUANA':['TJ','TIJ','TIJUANA','TIJUANA BC','TIJUANA B.C.','BC TIJUANA','SUCURSAL TIJUANA','PLANTA TIJUANA'],
+  'TORREON':['TRC','TORREON','TORREÓN','TORREON COAH','TORREON COAHUILA','SUCURSAL TORREON'],
+  'MEXICALI':['MXL','MEXICALI','SUCURSAL MEXICALI'],
+  'HERMOSILLO':['HMO','HERMOSILLO','SUCURSAL HERMOSILLO'],
+  'MONTERREY':['MTY','MONTERREY','NUEVO LEON','NL','SUCURSAL MONTERREY'],
+  'GUADALAJARA':['GDL','GUADALAJARA','JALISCO','SUCURSAL GUADALAJARA'],
+  'CDMX':['CDMX','MEXICO','MÉXICO','CIUDAD DE MEXICO','CIUDAD DE MÉXICO','DF','DISTRITO FEDERAL'],
+  'PUEBLA':['PUE','PUEBLA'],
+  'QUERETARO':['QRO','QUERETARO','QUERÉTARO'],
+  'LEON':['LEON','LEÓN','LEON GTO','LEÓN GTO'],
+  'SAN LUIS POTOSI':['SLP','SAN LUIS','SAN LUIS POTOSI','SAN LUIS POTOSÍ'],
+  'AGUASCALIENTES':['AGS','AGUASCALIENTES'],
+  'CULIACAN':['CULIACAN','CULIACÁN'],
+  'MERIDA':['MERIDA','MÉRIDA']
+};
+const SUCURSAL_ALIASES_FRONT={};
+Object.entries(SUCURSAL_ALIAS_GROUPS_FRONT).forEach(([canon,aliases])=>{
+  SUCURSAL_ALIASES_FRONT[normalize(canon).replace(/[^a-z0-9]/g,'')]=canon;
+  aliases.forEach(a=>SUCURSAL_ALIASES_FRONT[normalize(a).replace(/[^a-z0-9]/g,'')]=canon);
+});
 function normalizeKey(s){return normalize(s).replace(/[^a-z0-9]/g,'')}
-function sameLoose(a,b){return normalizeKey(a)===normalizeKey(b)}
+function canonicalSucursalFront(s){const k=normalizeKey(s);return SUCURSAL_ALIASES_FRONT[k]||String(s||'').toUpperCase().trim()}
+function sameLoose(a,b){return normalizeKey(canonicalSucursalFront(a))===normalizeKey(canonicalSucursalFront(b))}
 function rolActual(){return String(me?.role||'').toLowerCase()}
 function esUsuarioArea(){return ['operaciones','usuario_area','usuario'].includes(rolActual())}
 function puedeVerTodoFrontend(){return ['admin','gerente','mantenimiento'].includes(rolActual())}
