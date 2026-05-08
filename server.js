@@ -64,20 +64,47 @@ const AREA_ALIASES = new Map([
   ['PROD','PRODUCCION'], ['PRODUCCIÓN','PRODUCCION'], ['PRODUCCION','PRODUCCION'],
   ['CALIDAD','CALIDAD'], ['TERMINADO','TERMINADO'], ['CORTE','CORTE']
 ]);
-const SUCURSALES_BASE = [
-  'CHIHUAHUA','JUAREZ','TORREON','DURANGO','HERMOSILLO','MONTERREY','SALTILLO','CULIACAN','TIJUANA','MEXICALI','OBREGON','GUADALAJARA','MEXICO','QUERETARO','LEON','SAN LUIS POTOSI','PUEBLA','VERACRUZ','MERIDA','TAMPICO'
-];
-const SUCURSAL_ALIASES = new Map([
-  ['CHIH','CHIHUAHUA'], ['CHIHUAHUA','CHIHUAHUA'], ['CHIH.','CHIHUAHUA'], ['CUU','CHIHUAHUA'], ['MATRIZ','CHIHUAHUA'], ['IBSCHIHUAHUA','CHIHUAHUA'], ['PLANTACHIHUAHUA','CHIHUAHUA'],
-  ['JRZ','JUAREZ'], ['JUAREZ','JUAREZ'], ['JUÁREZ','JUAREZ'], ['CDJUAREZ','JUAREZ'], ['CIUDADJUAREZ','JUAREZ'], ['IBSJUAREZ','JUAREZ'],
-  ['TORREON','TORREON'], ['TORREÓN','TORREON'], ['TRC','TORREON'], ['IBSTORREON','TORREON'],
-  ['DGO','DURANGO'], ['DURANGO','DURANGO'], ['HMO','HERMOSILLO'], ['HERMOSILLO','HERMOSILLO'], ['MTY','MONTERREY'], ['MONTERREY','MONTERREY'],
-  ['SLW','SALTILLO'], ['SALTILLO','SALTILLO'], ['CLN','CULIACAN'], ['CULIACAN','CULIACAN'], ['CULIACÁN','CULIACAN'],
-  ['TIJ','TIJUANA'], ['TIJUANA','TIJUANA'], ['MXL','MEXICALI'], ['MEXICALI','MEXICALI'], ['OBREGON','OBREGON'], ['OBREGÓN','OBREGON'], ['CDOBREGON','OBREGON'], ['CIUDADOBREGON','OBREGON'],
-  ['GDL','GUADALAJARA'], ['GUADALAJARA','GUADALAJARA'], ['CDMX','MEXICO'], ['MEXICO','MEXICO'], ['MÉXICO','MEXICO'], ['QRO','QUERETARO'], ['QUERETARO','QUERETARO'], ['QUERÉTARO','QUERETARO'],
-  ['LEON','LEON'], ['LEÓN','LEON'], ['SLP','SAN LUIS POTOSI'], ['SANLUISPOTOSI','SAN LUIS POTOSI'], ['SANLUISPOTOSÍ','SAN LUIS POTOSI'],
-  ['PUEBLA','PUEBLA'], ['VERACRUZ','VERACRUZ'], ['MERIDA','MERIDA'], ['MÉRIDA','MERIDA'], ['TAMPICO','TAMPICO']
-]);
+// Catálogo flexible de sucursales.
+// IMPORTANTE: no limita a estas sucursales; si llega una sucursal nueva,
+// se guarda normalizada. Estos alias solo ayudan cuando vienen escritas diferente.
+const SUCURSAL_ALIAS_GROUPS = {
+  'CHIHUAHUA': ['CHIH','CHIH.','CHIHUAHUA','CUU','MATRIZ','IBS CHIHUAHUA','PLANTA CHIHUAHUA','SUCURSAL CHIHUAHUA'],
+  'JUAREZ': ['JRZ','JUAREZ','JUÁREZ','CD JUAREZ','CD. JUAREZ','CIUDAD JUAREZ','CIUDAD JUÁREZ','SUCURSAL JUAREZ'],
+  'TIJUANA': ['TJ','TIJ','TIJUANA','TIJUANA BC','TIJUANA B.C.','BC TIJUANA','SUCURSAL TIJUANA','PLANTA TIJUANA'],
+  'TORREON': ['TRC','TORREON','TORREÓN','TORREON COAH','TORREON COAHUILA','SUCURSAL TORREON'],
+  'MEXICALI': ['MXL','MEXICALI','SUCURSAL MEXICALI'],
+  'HERMOSILLO': ['HMO','HERMOSILLO','SUCURSAL HERMOSILLO'],
+  'MONTERREY': ['MTY','MONTERREY','NUEVO LEON','NL','SUCURSAL MONTERREY'],
+  'GUADALAJARA': ['GDL','GUADALAJARA','JALISCO','SUCURSAL GUADALAJARA'],
+  'CDMX': ['CDMX','MEXICO','MÉXICO','CIUDAD DE MEXICO','CIUDAD DE MÉXICO','DF','DISTRITO FEDERAL'],
+  'PUEBLA': ['PUE','PUEBLA'],
+  'QUERETARO': ['QRO','QUERETARO','QUERÉTARO'],
+  'LEON': ['LEON','LEÓN','LEON GTO','LEÓN GTO'],
+  'SAN LUIS POTOSI': ['SLP','SAN LUIS','SAN LUIS POTOSI','SAN LUIS POTOSÍ'],
+  'AGUASCALIENTES': ['AGS','AGUASCALIENTES'],
+  'CULIACAN': ['CULIACAN','CULIACÁN'],
+  'MERIDA': ['MERIDA','MÉRIDA']
+};
+const SUCURSAL_ALIASES = new Map();
+for(const [canon, aliases] of Object.entries(SUCURSAL_ALIAS_GROUPS)){
+  SUCURSAL_ALIASES.set(normKey(canon), canon);
+  for(const a of aliases) SUCURSAL_ALIASES.set(normKey(a), canon);
+}
+function sucursalVariants(v){
+  const raw = clean(v);
+  if(!raw) return [];
+  const canon = canonicalSucursal(raw);
+  const set = new Set([norm(raw), norm(canon)]);
+  const aliases = SUCURSAL_ALIAS_GROUPS[canon] || [];
+  for(const a of aliases) set.add(norm(a));
+  return [...set].filter(Boolean);
+}
+function addSucursalClause(params, clauses, columnSql, sucursalValue){
+  const variants = sucursalVariants(sucursalValue);
+  if(!variants.length) return;
+  params.push(variants);
+  clauses.push(`upper(coalesce(${columnSql},'')) = any($${params.length}::text[])`);
+}
 function canonicalArea(v){
   const value = clean(v);
   if(!value) return '';
@@ -104,7 +131,7 @@ function uniqueSorted(values){
 
 const DEMO_USERNAMES = ['demo','test','usuario','prueba','operador','operaciones_demo','demo_area','area_demo','user_demo'];
 const MATRIZ_SUCURSAL = 'CHIHUAHUA';
-function sameKey(a,b){ return norm(a) === norm(b); }
+function sameKey(a,b){ return canonicalSucursal(a) === canonicalSucursal(b); }
 function isGlobalRole(role){ return ['admin','gerente','mantenimiento'].includes(String(role||'').toLowerCase()); }
 function isGlobalUser(user){ return Boolean(user && isGlobalRole(user.role)); }
 function isTecnicoRole(role){ return ['tecnico','mantenimiento','admin','gerente'].includes(String(role||'').toLowerCase()); }
@@ -135,8 +162,8 @@ function canReleaseTicket(user, ticket){
   // misma sucursal y misma área del ticket.
   const userArea = norm(user.area_asignada || '');
   const ticketArea = norm(ticket.area || '');
-  const userSucursal = norm(user.sucursal || '');
-  const ticketSucursal = norm(ticket.sucursal || '');
+  const userSucursal = canonicalSucursal(user.sucursal || '');
+  const ticketSucursal = canonicalSucursal(ticket.sucursal || '');
 
   if(userArea && ticketArea && userArea === ticketArea){
     if(!ticketSucursal || !userSucursal || userSucursal === ticketSucursal) return true;
@@ -154,8 +181,7 @@ function addScopedClauses(user, params, clauses, alias=''){
   // No se filtra por área porque el Excel puede traer áreas como PRODUCCION,
   // TOOL CRIB, TALLER, etc. y si no coincide exacto, no aparece el listado.
   if(clean(user.sucursal)){
-    params.push(norm(user.sucursal));
-    clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`);
+    addSucursalClause(params, clauses, `${p}sucursal`, user.sucursal);
   }
 }
 
@@ -179,8 +205,7 @@ function addTicketVisibilityClauses(user, params, clauses, alias=''){
   // La comparación usa norm(), por eso BANDA NEGRA, Banda Negra o banda negra se toman igual.
   if(['operaciones','usuario_area','usuario'].includes(role)){
     if(clean(user.sucursal)){
-      params.push(norm(user.sucursal));
-      clauses.push(`upper(coalesce(${p}sucursal,'')) = $${params.length}`);
+      addSucursalClause(params, clauses, `${p}sucursal`, user.sucursal);
     }
     if(clean(user.area_asignada)){
       params.push(norm(user.area_asignada));
@@ -195,9 +220,11 @@ function addTicketVisibilityClauses(user, params, clauses, alias=''){
 }
 
 function buildWhere(clauses){ return clauses.length ? ' where ' + clauses.join(' and ') : ''; }
-async function getUserByUsername(username){
-  const r = await pool.query('select id, name, username, role, status, can_export, sucursal, area_asignada, telefono, correo from users where lower(username)=lower($1) limit 1', [clean(username)]);
-  return r.rows[0] || null;
+async function getUserByUsername(username, sucursal=''){
+  const r = await pool.query("select id, name, username, role, status, can_export, sucursal, area_asignada, telefono, correo from users where lower(username)=lower($1) order by case when role='admin' then 0 else 1 end, sucursal", [clean(username)]);
+  const rows = r.rows || [];
+  if(!sucursal) return rows[0] || null;
+  return rows.find(u => sameKey(u.sucursal, sucursal) || sameKey(u.sucursal, MATRIZ_SUCURSAL)) || rows[0] || null;
 }
 function requireLogin(req,res,next){ if(!req.session.user) return res.status(401).json({error:'Sesión vencida. Inicia sesión otra vez.'}); next(); }
 function requireAdmin(req,res,next){ if(!req.session.user || req.session.user.role !== 'admin') return res.status(403).json({error:'Solo administrador.'}); next(); }
@@ -409,12 +436,49 @@ async function initDb(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until timestamptz;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS can_export boolean NOT NULL DEFAULT false;
 
+    -- Multi-sucursal: permite repetir el mismo username si es en otra sucursal.
+    -- No borra usuarios ni datos. Solo cambia la regla de unicidad.
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'users_username_key'
+      ) THEN
+        ALTER TABLE users DROP CONSTRAINT users_username_key;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'users_username_sucursal_key'
+      ) THEN
+        ALTER TABLE users ADD CONSTRAINT users_username_sucursal_key UNIQUE (username, sucursal);
+      END IF;
+    END $$;
+
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS ubicacion text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS marca text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS modelo text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS usuario text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS estatus text;
     ALTER TABLE activos ADD COLUMN IF NOT EXISTS search_text text;
+
+    -- Multi-sucursal: permite repetir número de activo/herramienta si es en otra sucursal.
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'activos_numero_key'
+      ) THEN
+        ALTER TABLE activos DROP CONSTRAINT activos_numero_key;
+      END IF;
+
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'activos_numero_sucursal_key'
+      ) THEN
+        ALTER TABLE activos ADD CONSTRAINT activos_numero_sucursal_key UNIQUE (numero, sucursal);
+      END IF;
+    END $$;
 
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ubicacion text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS solicitante text;
@@ -447,24 +511,6 @@ async function initDb(){
     ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS correo text;
     ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS telefono text;
     ALTER TABLE empleados_reportantes ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'activo';
-  `);
-
-  // MEJORA AUTORIZADA: usuarios y activos pueden repetirse en diferentes sucursales.
-  // Se elimina el UNIQUE global viejo y se crea UNIQUE por sucursal.
-  await pool.query(`
-    DO $$
-    BEGIN
-      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_username_key') THEN
-        ALTER TABLE users DROP CONSTRAINT users_username_key;
-      END IF;
-      IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'activos_numero_key') THEN
-        ALTER TABLE activos DROP CONSTRAINT activos_numero_key;
-      END IF;
-    END $$;
-    CREATE UNIQUE INDEX IF NOT EXISTS users_username_sucursal_uidx
-      ON users (lower(username), sucursal);
-    CREATE UNIQUE INDEX IF NOT EXISTS activos_numero_sucursal_uidx
-      ON activos (numero, sucursal);
   `);
 
   await pool.query(`
@@ -547,49 +593,44 @@ app.get('/api/health', async (req,res)=>{
 });
 
 app.get('/api/me', (req,res)=> res.json({user:req.session.user || null}));
-app.get('/api/sucursales-login', async (req,res)=>{
-  try{
-    const r = await pool.query(`
-      select sucursal from users where coalesce(sucursal,'') <> ''
-      union select sucursal from activos where coalesce(sucursal,'') <> ''
-      union select sucursal from empleados_reportantes where coalesce(sucursal,'') <> ''
-      union select sucursal from tickets where coalesce(sucursal,'') <> ''
-    `);
-    const sucursales = uniqueSorted([...SUCURSALES_BASE, ...r.rows.map(x => canonicalSucursal(x.sucursal || ''))]);
-    res.json({sucursales});
-  }catch(err){
-    console.error('Error sucursales-login:', err);
-    res.json({sucursales:SUCURSALES_BASE});
-  }
-});
-
 app.post('/api/login', async (req,res)=>{
   const username = clean(req.body.username).toLowerCase();
   const password = String(req.body.password || '');
-  const sucursal = canonicalSucursal(req.body.sucursal || '');
-  if(!username || !password || !sucursal) return res.status(400).json({error:'Usuario, contraseña y sucursal son obligatorios.'});
+  const sucursalLogin = canonicalSucursal(req.body.sucursal || req.body.loginSucursal || '');
 
-  let r = await pool.query("select * from users where lower(username)=lower($1) and coalesce(sucursal,'')=$2 limit 1", [username, sucursal]);
+  if(!username || !password) return res.status(400).json({error:'Usuario y contraseña son obligatorios.'});
 
-  // Respaldo seguro para admin viejo sin sucursal configurada.
-  if(r.rows.length === 0 && username === 'admin'){
-    r = await pool.query('select * from users where lower(username)=lower($1) limit 1', [username]);
+  const r = await pool.query("select * from users where lower(username)=lower($1) order by case when role='admin' then 0 else 1 end, sucursal", [username]);
+  let candidates = r.rows || [];
+
+  if(!candidates.length) return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
+
+  // Admin puede entrar global. Usuarios repetidos deben seleccionar la sucursal correcta.
+  if(sucursalLogin){
+    candidates = candidates.filter(u => String(u.role||'').toLowerCase()==='admin' || sameKey(u.sucursal, sucursalLogin));
+  }else{
+    const nonAdmin = candidates.filter(u => String(u.role||'').toLowerCase() !== 'admin');
+    if(nonAdmin.length > 1){
+      return res.status(400).json({error:'Selecciona la sucursal para este usuario.'});
+    }
   }
 
-  const user = r.rows[0];
+  const user = candidates[0];
   if(!user) return res.status(401).json({error:'Usuario, contraseña o sucursal incorrectos.'});
   if(user.status !== 'activo') return res.status(403).json({error:'Usuario inactivo. Contacta al administrador.'});
   if(user.locked_until && new Date(user.locked_until) > new Date()) return res.status(423).json({error:'Usuario bloqueado temporalmente por intentos fallidos.'});
+
   const ok = await bcrypt.compare(password, user.password_hash);
   if(!ok){
     const attempts = (user.failed_login_attempts || 0) + 1;
     const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15*60*1000) : null;
     await pool.query('update users set failed_login_attempts=$1, locked_until=$2 where id=$3', [attempts, lockedUntil, user.id]);
-    return res.status(401).json({error:'Usuario, contraseña o sucursal incorrectos.'});
+    return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
   }
+
   await pool.query('update users set failed_login_attempts=0, locked_until=null where id=$1', [user.id]);
   req.session.user = publicUser(user);
-  await logAction(user.id, 'login', {username, sucursal});
+  await logAction(user.id, 'login', {username, sucursal:sucursalLogin || user.sucursal || ''});
   res.json({user:req.session.user});
 });
 app.post('/api/logout', requireLogin, async (req,res)=>{ const uid=req.session.user.id; req.session.destroy(()=>{}); await logAction(uid,'logout'); res.json({ok:true}); });
@@ -665,11 +706,13 @@ app.get('/api/activos', requireLogin, async (req,res)=>{
 app.post('/api/activos', requireAdmin, async (req,res)=>{
   const a = req.body;
   if(!clean(a.numero) || !clean(a.descripcion)) return res.status(400).json({error:'Número y descripción son obligatorios.'});
-  const search = norm([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
+  const sucursalCanon = canonicalSucursal(a.sucursal || 'SIN SUCURSAL');
+  const areaCanon = canonicalArea(a.area);
+  const search = norm([a.numero,a.descripcion,areaCanon,a.tipo,sucursalCanon,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
   const r = await pool.query(`insert into activos(numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-    on conflict(numero,sucursal) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, sucursal=excluded.sucursal, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()
-    returning *`, [clean(a.numero),clean(a.descripcion),canonicalArea(a.area),clean(a.tipo),canonicalSucursal(a.sucursal || 'SIN SUCURSAL'),clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
+    on conflict(numero, sucursal) do update set descripcion=excluded.descripcion, area=excluded.area, tipo=excluded.tipo, ubicacion=excluded.ubicacion, marca=excluded.marca, modelo=excluded.modelo, usuario=excluded.usuario, estatus=excluded.estatus, search_text=excluded.search_text, updated_at=now()
+    returning *`, [clean(a.numero),clean(a.descripcion),areaCanon,clean(a.tipo),sucursalCanon,clean(a.ubicacion),clean(a.marca),clean(a.modelo),clean(a.usuario),clean(a.estatus||'VIGENTE'),search]);
   await logAction(req.session.user.id, 'upsert_asset', {numero:a.numero});
   res.json(r.rows[0]);
 });
@@ -712,11 +755,15 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
       continue;
     }
 
+    const sucursalCanon = canonicalSucursal(a.sucursal || 'SIN SUCURSAL');
+    const areaCanon = canonicalArea(a.area);
+
     const search = norm([
       a.numero,
       a.descripcion,
-      a.area,
+      areaCanon,
       a.tipo,
+      sucursalCanon,
       a.sucursal,
       a.ubicacion,
       a.marca,
@@ -725,13 +772,13 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
       a.estatus
     ].join(' '));
 
-    const exists = await pool.query('select id from activos where numero=$1', [a.numero]);
+    const exists = await pool.query('select id from activos where numero=$1 and sucursal=$2', [a.numero, sucursalCanon]);
 
     await pool.query(`
       insert into activos(
         numero,descripcion,area,tipo,sucursal,ubicacion,marca,modelo,usuario,estatus,search_text
       ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-      on conflict(numero,sucursal) do update set
+      on conflict(numero, sucursal) do update set
         descripcion=excluded.descripcion,
         area=excluded.area,
         tipo=excluded.tipo,
@@ -746,9 +793,9 @@ app.post('/api/import/activos', requireAdmin, upload.single('archivo'), async (r
     `,[
       a.numero,
       a.descripcion,
-      canonicalArea(a.area),
+      areaCanon,
       a.tipo,
-      canonicalSucursal(a.sucursal || 'SIN SUCURSAL'),
+      sucursalCanon,
       a.ubicacion,
       a.marca,
       a.modelo,
@@ -817,12 +864,6 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
     if(pass.length < 6) return res.status(400).json({error:'La contraseña debe tener mínimo 6 caracteres.'});
 
     const role = clean(u.role || 'operaciones').toLowerCase();
-    const sucursal = canonicalSucursal(u.sucursal);
-    if(!sucursal) return res.status(400).json({error:'Selecciona la sucursal del usuario.'});
-    const areaAsignada = canonicalArea(u.area_asignada);
-    if(['operaciones','usuario_area','usuario'].includes(role) && !areaAsignada) return res.status(400).json({error:'Selecciona el área del usuario.'});
-    const existe = await pool.query('select id from users where lower(username)=lower($1) and sucursal=$2 limit 1', [clean(u.username), sucursal]);
-    if(existe.rows.length) return res.status(400).json({error:'Ese usuario ya existe en esta sucursal. Puedes usarlo en otra sucursal.'});
     const canExport = Boolean(u.can_export) || role === 'gerente' || role === 'admin';
     const hash=await bcrypt.hash(pass,12);
 
@@ -832,13 +873,13 @@ app.post('/api/users', requireAdmin, async (req,res)=>{
         area_asignada,sucursal,telefono,correo,can_export
       ) values($1,$2,lower($3),$4,$5,'activo',true,$6,$7,$8,$9,$10)
       returning id, numero_empleado, name, username, role, status, must_change_password, can_export, area_asignada, sucursal, telefono, correo
-    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,areaAsignada,sucursal,clean(u.telefono),clean(u.correo),canExport]);
+    `,[clean(u.numero_empleado),clean(u.name),clean(u.username),hash,role,canonicalArea(u.area_asignada),canonicalSucursal(u.sucursal),clean(u.telefono),clean(u.correo),canExport]);
 
     await logAction(req.session.user.id, 'create_user', {username:u.username});
     res.json(r.rows[0]);
   }catch(err){
     console.error('Error creando usuario:', err);
-    if(err.code === '23505') return res.status(400).json({error:'Ese usuario o activo ya existe en esta sucursal.'});
+    if(err.code === '23505') return res.status(400).json({error:'Ese usuario ya existe en esa sucursal. Puedes usar el mismo usuario en otra sucursal.'});
     res.status(500).json({error:err.message});
   }
 });
@@ -979,7 +1020,7 @@ app.post('/api/import/empleados', requireAdmin, upload.single('archivo'), async 
       continue;
     }
 
-    const sucursal = pick(row, ['sucursal','SUCURSAL','PLANTA']) || 'CHIHUAHUA';
+    const sucursal = canonicalSucursal(pick(row, ['sucursal','SUCURSAL','PLANTA']) || 'CHIHUAHUA');
     const area = pick(row, ['areaAsignada','AREA ASIGNADA','AREA','DEPARTAMENTO','DEPTO','departamento']);
     const puesto = pick(row, ['puesto','PUESTO','rol','ROL','CARGO']);
     const correo = pick(row, ['correo','CORREO','EMAIL','E-MAIL','MAIL','email']);
@@ -1139,16 +1180,16 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
 app.post('/api/tickets/:id/asignar', requireLogin, async (req,res)=>{
   try{
     if(!canManageTickets(req.session.user)) return res.status(403).json({error:'Solo gerente, mantenimiento o admin puede asignar tickets.'});
-    const tecnico = await getUserByUsername(req.body.tecnico_username);
-    if(!tecnico || tecnico.status !== 'activo' || !isTecnicoRole(tecnico.role)) return res.status(400).json({error:'Técnico no válido o inactivo.'});
-
     const qTicket = await pool.query('select * from tickets where id=$1', [req.params.id]);
     const ticket = qTicket.rows[0];
     if(!ticket) return res.status(404).json({error:'Ticket no encontrado.'});
 
-    const ticketSuc = norm(ticket.sucursal);
-    const tecnicoSuc = norm(tecnico.sucursal);
-    if(ticketSuc && tecnicoSuc && ticketSuc !== tecnicoSuc && tecnicoSuc !== norm(MATRIZ_SUCURSAL)){
+    const tecnico = await getUserByUsername(req.body.tecnico_username, ticket.sucursal);
+    if(!tecnico || tecnico.status !== 'activo' || !isTecnicoRole(tecnico.role)) return res.status(400).json({error:'Técnico no válido o inactivo.'});
+
+    const ticketSuc = canonicalSucursal(ticket.sucursal);
+    const tecnicoSuc = canonicalSucursal(tecnico.sucursal);
+    if(ticketSuc && tecnicoSuc && ticketSuc !== tecnicoSuc && tecnicoSuc !== MATRIZ_SUCURSAL){
       return res.status(400).json({error:'Ese técnico no pertenece a la sucursal del ticket ni a matriz Chihuahua.'});
     }
 
