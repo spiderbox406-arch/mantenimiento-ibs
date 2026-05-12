@@ -139,19 +139,21 @@ function uniqueSorted(values){
 const DEMO_USERNAMES = ['demo','test','usuario','prueba','operador','operaciones_demo','demo_area','area_demo','user_demo'];
 const MATRIZ_SUCURSAL = 'CHIHUAHUA';
 function sameKey(a,b){ return canonicalSucursal(a) === canonicalSucursal(b); }
+function isAreaMantenimiento(user){ return Boolean(user && norm(user.area_asignada || '').includes('MANTENIMIENTO')); }
+function isGerenteSupervisorOperaciones(user){
+  const role = String(user?.role || '').toLowerCase();
+  const area = norm(user?.area_asignada || '');
+  return Boolean(user && (['admin','gerente','supervisor'].includes(role) || ((role === 'operaciones' || role === 'usuario_area' || role === 'usuario') && (area.includes('OPERACIONES') || area.includes('PRODUCCION')))));
+}
 function isGlobalRole(role){ return ['admin','gerente','mantenimiento'].includes(String(role||'').toLowerCase()); }
 function isGlobalUser(user){ return Boolean(user && isGlobalRole(user.role)); }
 function isTecnicoRole(role){ return ['tecnico','mantenimiento','admin','gerente'].includes(String(role||'').toLowerCase()); }
-function isMaintenanceAreaUser(user){
-  if(!user) return false;
-  const role = String(user.role||'').toLowerCase();
-  const area = canonicalArea(user.area_asignada || '');
-  return ['admin','gerente','mantenimiento','tecnico'].includes(role) || area === 'MANTENIMIENTO';
-}
-function canManageTickets(user){ return isMaintenanceAreaUser(user); }
+function canManageTickets(user){ return Boolean(user && (isAreaMantenimiento(user) || ['admin','gerente','mantenimiento','tecnico'].includes(String(user.role||'').toLowerCase()))); }
 function canWorkTicket(user, ticket){
   if(!user || !ticket) return false;
-  if(isMaintenanceAreaUser(user)) return true;
+  const role = String(user.role||'').toLowerCase();
+  if(['admin','gerente','mantenimiento'].includes(role) || isAreaMantenimiento(user)) return true;
+  if(role === 'tecnico') return String(ticket.tecnico_username||'').toLowerCase() === String(user.username||'').toLowerCase();
   return false;
 }
 
@@ -200,9 +202,9 @@ function addTicketVisibilityClauses(user, params, clauses, alias=''){
   const p = alias ? alias + '.' : '';
   const role = String(user?.role || '').toLowerCase();
 
-  // Personal del departamento MANTENIMIENTO: ve los tickets que ya tomó y también los reportados disponibles de su sucursal.
+  // Técnico de mantenimiento: ve los tickets que ya tomó y también los reportados disponibles de su sucursal.
   // Así puede agarrar una reparación sin esperar asignación del gerente.
-  if(role === 'tecnico' || canonicalArea(user?.area_asignada || '') === 'MANTENIMIENTO'){
+  if(role === 'tecnico'){
     params.push(String(user.username || '').toLowerCase());
     const userParam = `$${params.length}`;
     if(clean(user.sucursal)){
@@ -273,6 +275,11 @@ function secondsBetween(a, b){
   return Math.max(0, Math.round((end - start) / 1000));
 }
 function calcTicketTimes(t, nowDate = new Date()){
+  const cuenta = String(t.cuenta_tiempo_muerto || 'SI').toUpperCase();
+  const condicion = norm(t.condicion_equipo || '');
+  if(cuenta === 'NO' || condicion.includes('TRABAJA NORMAL')){
+    return {mttoMin:0, produccionMin:0, muertoTotalMin:0, esperaInicioMin:0, esperaValidacionMin:0, mttoSeg:0, produccionSeg:0, muertoTotalSeg:0};
+  }
   // Flujo autorizado:
   // MTTO inicia desde que se crea el ticket y sigue hasta que el técnico libera/entrega.
   // Operaciones inicia cuando el técnico libera/entrega y termina cuando Operaciones libera o devuelve.
@@ -389,6 +396,8 @@ async function initDb(){
       falla text not null,
       prioridad text default 'Normal',
       tipo_falla text,
+      condicion_equipo text,
+      cuenta_tiempo_muerto text not null default 'SI',
       estado text not null default 'Reportado',
       tecnico_username text,
       diagnostico text,
@@ -503,6 +512,8 @@ async function initDb(){
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS empleado_solicitante text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS telefono_solicitante text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tipo_falla text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS condicion_equipo text;
+    ALTER TABLE tickets ADD COLUMN IF NOT EXISTS cuenta_tiempo_muerto text NOT NULL DEFAULT 'SI';
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tecnico_username text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS diagnostico text;
     ALTER TABLE tickets ADD COLUMN IF NOT EXISTS solucion text;
@@ -1220,12 +1231,14 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
         falla,
         prioridad,
         tipo_falla,
+        condicion_equipo,
+        cuenta_tiempo_muerto,
         estado,
         created_by,
         fotos_reporte,
         mtto_inicio_actual
       )
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'Reportado',$12,$13,now())
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'Reportado',$14,$15,case when $13='NO' then null else now() end)
       RETURNING *
     `, [
       clean(t.activo),
@@ -1239,6 +1252,8 @@ app.post('/api/tickets', requireLogin, uploadImages.array('fotos_reporte', 6), a
       clean(t.falla),
       clean(t.prioridad || 'Normal'),
       clean(t.tipo_falla),
+      clean(t.condicion_equipo || 'TRABAJA NORMAL CON ALERTA'),
+      clean(t.cuenta_tiempo_muerto || 'SI'),
       req.session.user.id,
       JSON.stringify(fotosReporte)
     ]);
@@ -1481,20 +1496,25 @@ app.get('/api/reportes', requireLogin, async (req,res)=>{
     pool.query('select count(*)::int n from users')
   ]);
   let mttoMin=0, produccionMin=0, muertoTotalMin=0, esperaInicioMin=0, esperaValidacionMin=0;
-  const porEstado={}, porArea={}, porTipoFalla={}, porSucursal={}, porActivo={}, porTecnico={};
+  const porEstado={}, porArea={}, porTipoFalla={}, porCondicionEquipo={}, porSucursal={}, porActivo={}, porTecnico={}, muertoPorTipoFalla={}, alertasPorActivo={};
   for(const t of allTickets.rows){
     const x = calcTicketTimes(t);
     mttoMin += x.mttoMin; produccionMin += x.produccionMin; muertoTotalMin += x.muertoTotalMin;
     esperaInicioMin += x.esperaInicioMin; esperaValidacionMin += x.esperaValidacionMin;
     porEstado[t.estado || 'Sin estado'] = (porEstado[t.estado || 'Sin estado']||0)+1;
     porArea[t.area || 'Sin área'] = (porArea[t.area || 'Sin área']||0)+1;
-    porTipoFalla[t.tipo_falla || 'Sin tipo'] = (porTipoFalla[t.tipo_falla || 'Sin tipo']||0)+1;
+    const tipoFallaKey = t.tipo_falla || 'Sin tipo';
+    const condicionKey = t.condicion_equipo || 'Sin condición';
+    porTipoFalla[tipoFallaKey] = (porTipoFalla[tipoFallaKey]||0)+1;
+    porCondicionEquipo[condicionKey] = (porCondicionEquipo[condicionKey]||0)+1;
+    muertoPorTipoFalla[tipoFallaKey] = (muertoPorTipoFalla[tipoFallaKey]||0) + x.muertoTotalMin;
+    if(String(t.cuenta_tiempo_muerto||'SI').toUpperCase()==='NO') alertasPorActivo[(t.activo || 'Sin activo') + ' · ' + (t.activo_descripcion || '')] = (alertasPorActivo[(t.activo || 'Sin activo') + ' · ' + (t.activo_descripcion || '')]||0)+1;
     porSucursal[t.sucursal || 'Sin sucursal'] = (porSucursal[t.sucursal || 'Sin sucursal']||0)+1;
     porActivo[(t.activo || 'Sin activo') + ' · ' + (t.activo_descripcion || '')] = (porActivo[(t.activo || 'Sin activo') + ' · ' + (t.activo_descripcion || '')]||0)+1;
     porTecnico[t.tecnico_username || 'Sin asignar'] = (porTecnico[t.tecnico_username || 'Sin asignar']||0)+1;
   }
   const abiertos = allTickets.rows.filter(t=>t.estado !== 'Liberado').length;
-  res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado, porArea, porTipoFalla, porSucursal, porActivo, porTecnico });
+  res.json({ totalTickets:allTickets.rows.length, abiertos, totalActivos:act.rows[0].n, totalEmpleados:emp.rows[0].n, mttoMin, produccionMin, muertoTotalMin, esperaInicioMin, esperaValidacionMin, porEstado, porArea, porTipoFalla, porCondicionEquipo, muertoPorTipoFalla, alertasPorActivo, porSucursal, porActivo, porTecnico });
 });
 app.get('/api/export/excel', requireCanExport, async (req,res)=>{
   const params=[]; const clauses=[];
@@ -1555,6 +1575,8 @@ app.get('/api/export/excel', requireCanExport, async (req,res)=>{
       telefono_solicitante: t.telefono_solicitante,
       prioridad: t.prioridad,
       tipo_falla: t.tipo_falla,
+      condicion_equipo: t.condicion_equipo,
+      cuenta_tiempo_muerto: t.cuenta_tiempo_muerto,
       estado: t.estado,
       tecnico_username: t.tecnico_username,
       falla: t.falla,
@@ -1636,25 +1658,39 @@ app.get('/api/tickets/:id/reporte', requireLogin, async (req,res)=>{
   const fotos=(arr)=>{ let f=[]; try{ f=Array.isArray(arr)?arr:JSON.parse(arr||'[]'); }catch(e){ f=[]; } return f.map(src=>`<img src="${escHtml(src)}">`).join(''); };
   const tiempos=calcTicketTimes(t);
   res.setHeader('Content-Type','text/html; charset=utf-8');
-  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Ticket ${escHtml(id)}</title><style>body{font-family:Arial;margin:28px;color:#222}h1{border-bottom:4px solid #ff6a00;padding-bottom:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #ccc;border-radius:10px;padding:10px;margin:10px 0}.photos img{max-width:180px;max-height:140px;margin:6px;border:1px solid #ccc;border-radius:8px}.btn{background:#ff6a00;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><button class="btn no-print" onclick="window.print()">Imprimir / Guardar como PDF</button><h1>Reporte de ticket ${escHtml(id)}</h1><div class="grid"><p><b>Estado:</b> ${escHtml(t.estado)}</p><p><b>Prioridad:</b> ${escHtml(t.prioridad)}</p><p><b>Activo:</b> ${escHtml(t.activo)} - ${escHtml(t.activo_descripcion)}</p><p><b>Área/Sucursal:</b> ${escHtml(t.area)} · ${escHtml(t.sucursal)}</p><p><b>Ubicación:</b> ${escHtml(t.ubicacion)}</p><p><b>Solicita:</b> ${escHtml(t.solicitante)} ${escHtml(t.telefono_solicitante)}</p><p><b>Técnico:</b> ${escHtml(t.tecnico_username)}</p><p><b>Tipo falla:</b> ${escHtml(t.tipo_falla)}</p></div><div class="box"><b>Falla reportada:</b><br>${escHtml(t.falla)}</div><div class="box"><b>Diagnóstico:</b><br>${escHtml(t.diagnostico)}</div><div class="box"><b>Solución:</b><br>${escHtml(t.solucion)}</div><div class="grid"><p><b>Creado:</b> ${escHtml(t.creado)}</p><p><b>Inicio:</b> ${escHtml(t.iniciado)}</p><p><b>Técnico libera:</b> ${escHtml(t.terminado)}</p><p><b>Operación libera:</b> ${escHtml(t.liberado)}</p><p><b>Tiempo MTTO:</b> ${tiempos.mttoMin} min</p><p><b>Tiempo operaciones:</b> ${tiempos.produccionMin} min</p><p><b>Total muerto:</b> ${tiempos.muertoTotalMin} min</p></div><h2>Fotos reporte</h2><div class="photos">${fotos(t.fotos_reporte)}</div><h2>Fotos trabajo</h2><div class="photos">${fotos(t.fotos_trabajo)}</div></body></html>`);
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Ticket ${escHtml(id)}</title><style>body{font-family:Arial;margin:28px;color:#222}h1{border-bottom:4px solid #ff6a00;padding-bottom:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #ccc;border-radius:10px;padding:10px;margin:10px 0}.photos img{max-width:180px;max-height:140px;margin:6px;border:1px solid #ccc;border-radius:8px}.btn{background:#ff6a00;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><button class="btn no-print" onclick="window.print()">Imprimir / Guardar como PDF</button><h1>Reporte de ticket ${escHtml(id)}</h1><div class="grid"><p><b>Estado:</b> ${escHtml(t.estado)}</p><p><b>Prioridad:</b> ${escHtml(t.prioridad)}</p><p><b>Activo:</b> ${escHtml(t.activo)} - ${escHtml(t.activo_descripcion)}</p><p><b>Área/Sucursal:</b> ${escHtml(t.area)} · ${escHtml(t.sucursal)}</p><p><b>Ubicación:</b> ${escHtml(t.ubicacion)}</p><p><b>Solicita:</b> ${escHtml(t.solicitante)} ${escHtml(t.telefono_solicitante)}</p><p><b>Técnico:</b> ${escHtml(t.tecnico_username)}</p><p><b>Tipo falla:</b> ${escHtml(t.tipo_falla)}</p><p><b>Condición equipo:</b> ${escHtml(t.condicion_equipo)}</p><p><b>Cuenta tiempo muerto:</b> ${escHtml(t.cuenta_tiempo_muerto)}</p></div><div class="box"><b>Falla reportada:</b><br>${escHtml(t.falla)}</div><div class="box"><b>Diagnóstico:</b><br>${escHtml(t.diagnostico)}</div><div class="box"><b>Solución:</b><br>${escHtml(t.solucion)}</div><div class="grid"><p><b>Creado:</b> ${escHtml(t.creado)}</p><p><b>Inicio:</b> ${escHtml(t.iniciado)}</p><p><b>Técnico libera:</b> ${escHtml(t.terminado)}</p><p><b>Operación libera:</b> ${escHtml(t.liberado)}</p><p><b>Tiempo MTTO:</b> ${tiempos.mttoMin} min</p><p><b>Tiempo operaciones:</b> ${tiempos.produccionMin} min</p><p><b>Total muerto:</b> ${tiempos.muertoTotalMin} min</p></div><h2>Fotos reporte</h2><div class="photos">${fotos(t.fotos_reporte)}</div><h2>Fotos trabajo</h2><div class="photos">${fotos(t.fotos_trabajo)}</div></body></html>`);
 });
 
 // ================= MODULO AUTORIZADO: PRESTAMO DE UNIDADES =================
-function canManageUnitLoans(user){ return isMaintenanceAreaUser(user); }
+function canManageUnitLoans(user){ return Boolean(user && (isAreaMantenimiento(user) || isGerenteSupervisorOperaciones(user) || ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase()))); }
+function canTakeUnitChecklist(user){ return Boolean(user && (isAreaMantenimiento(user) || ['admin','mantenimiento'].includes(String(user.role||'').toLowerCase()))); }
+function canAssignUnitByOperations(user){ return isGerenteSupervisorOperaciones(user); }
 function sameUsername(a,b){ return String(a||'').toLowerCase() === String(b||'').toLowerCase(); }
 function canWorkUnitDelivery(user, loan){
   if(!user || !loan) return false;
-  if(isMaintenanceAreaUser(user)){
+  const role=String(user.role||'').toLowerCase();
+  if(!canTakeUnitChecklist(user)) return false;
+  if(['admin','mantenimiento'].includes(role) || isAreaMantenimiento(user)){
     if(!loan.tomada_por_username) return true;
-    return sameUsername(loan.tomada_por_username, user.username) || canonicalArea(user.area_asignada || '') === 'MANTENIMIENTO' || ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase());
+    return sameUsername(loan.tomada_por_username, user.username);
+  }
+  if(role==='tecnico' && isAreaMantenimiento(user)){
+    if(!loan.tomada_por_username) return true;
+    return sameUsername(loan.tomada_por_username, user.username);
   }
   return false;
 }
 function canWorkUnitReception(user, loan){
   if(!user || !loan) return false;
-  if(isMaintenanceAreaUser(user)){
+  const role=String(user.role||'').toLowerCase();
+  if(!canTakeUnitChecklist(user)) return false;
+  if(['admin','mantenimiento'].includes(role) || isAreaMantenimiento(user)){
     if(!loan.recepcion_por_username) return true;
-    return sameUsername(loan.recepcion_por_username, user.username) || canonicalArea(user.area_asignada || '') === 'MANTENIMIENTO' || ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase());
+    return sameUsername(loan.recepcion_por_username, user.username);
+  }
+  if(role==='tecnico' && isAreaMantenimiento(user)){
+    if(!loan.recepcion_por_username) return true;
+    return sameUsername(loan.recepcion_por_username, user.username);
   }
   return false;
 }
@@ -1688,14 +1724,14 @@ app.post('/api/unidad-prestamos', requireLogin, uploadImages.fields([{name:'foto
   if(!clean(b.tecnico_nombre)) return res.status(400).json({error:'Selecciona técnico/usuario desde empleados.'});
   if(!clean(b.licencia_numero) && !licenciaFotos.length) return res.status(400).json({error:'Captura número de licencia o anexa foto de licencia.'});
   const folio='UNI-'+Date.now();
-  const datos = {foto_licencia: licenciaFotos[0] || '', nota:'La unidad se asigna únicamente por Mantenimiento.'};
+  const datos = {foto_licencia: licenciaFotos[0] || '', nota:'La unidad se asigna únicamente por Gerente/Supervisor de Operaciones. Mantenimiento hace checklist.'};
   const r=await pool.query(`insert into unidad_prestamos(folio,tipo_salida,empresa,op,tecnico_id,tecnico_nombre,tecnico_numero,cantidad_tecnicos,licencia_numero,lleva_remolque,datos_remolque,sucursal,area,created_by)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`, [folio,clean(b.tipo_salida),clean(b.empresa),clean(b.op),clean(b.tecnico_id),clean(b.tecnico_nombre),clean(b.tecnico_numero),Number(b.cantidad_tecnicos||1),clean(b.licencia_numero),clean(b.lleva_remolque)||'NO',clean(b.datos_remolque) + (datos.foto_licencia ? `\nFoto licencia: ${datos.foto_licencia}` : ''),canonicalSucursal(user.sucursal||''),canonicalArea(user.area_asignada||''),user.id]);
   await logAction(user.id,'crear_prestamo_unidad',{folio, foto_licencia:datos.foto_licencia});
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/tomar', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede tomar la entrega.'});
+  if(!canTakeUnitChecklist(req.session.user)) return res.status(403).json({error:'Solo personal del área Mantenimiento puede tomar la entrega.'});
   const user=req.session.user;
   const r=await pool.query(`update unidad_prestamos
     set tomada_por_id=$1, tomada_por_username=$2, tomada_por_nombre=$3, tomada_en=now(), estado='EN ENTREGA', actualizado=now()
@@ -1709,7 +1745,7 @@ app.post('/api/unidad-prestamos/:folio/tomar', requireLogin, async (req,res)=>{
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/tomar-recepcion', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede tomar la recepción.'});
+  if(!canTakeUnitChecklist(req.session.user)) return res.status(403).json({error:'Solo personal del área Mantenimiento puede tomar la recepción.'});
   const user=req.session.user;
   const r=await pool.query(`update unidad_prestamos
     set recepcion_por_id=$1, recepcion_por_username=$2, recepcion_por_nombre=$3, recepcion_en=now(), estado='EN RECEPCION', actualizado=now()
@@ -1723,13 +1759,12 @@ app.post('/api/unidad-prestamos/:folio/tomar-recepcion', requireLogin, async (re
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/asignar', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede asignar unidad.'});
+  if(!canAssignUnitByOperations(req.session.user)) return res.status(403).json({error:'Solo Gerente/Supervisor de Operaciones puede asignar unidad.'});
   const actual=await pool.query('select * from unidad_prestamos where folio=$1',[req.params.folio]);
   if(!actual.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
-  if(!canWorkUnitDelivery(req.session.user, actual.rows[0])) return res.status(403).json({error:'Esta entrega la tomó otro técnico.'});
   const unidad=clean(req.body.unidad_asignada);
   if(!unidad) return res.status(400).json({error:'Unidad obligatoria.'});
-  const r=await pool.query(`update unidad_prestamos set unidad_asignada=$1, estado='EN ENTREGA', tomada_por_id=coalesce(tomada_por_id,$2), tomada_por_username=coalesce(tomada_por_username,$3), tomada_por_nombre=coalesce(tomada_por_nombre,$4), tomada_en=coalesce(tomada_en,now()), actualizado=now() where folio=$5 returning *`, [unidad,req.session.user.id,clean(req.session.user.username),clean(req.session.user.name||req.session.user.username),req.params.folio]);
+  const r=await pool.query(`update unidad_prestamos set unidad_asignada=$1, estado='ASIGNADO', actualizado=now() where folio=$2 returning *`, [unidad,req.params.folio]);
   await logAction(req.session.user.id,'asignar_unidad',{folio:req.params.folio,unidad});
   res.json(r.rows[0]);
 });
@@ -1746,7 +1781,7 @@ function validarChecklistUnidad(b){
   return '';
 }
 app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fields([{name:'fotos',maxCount:20}]), async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede guardar checklist.'});
+  if(!canTakeUnitChecklist(req.session.user)) return res.status(403).json({error:'Solo personal del área Mantenimiento puede guardar checklist.'});
   const folio=req.params.folio;
   const loan=await pool.query('select * from unidad_prestamos where folio=$1', [folio]);
   if(!loan.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
@@ -1754,7 +1789,7 @@ app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fi
   const tipo=clean(b.tipo)||'ENTREGA';
   if(tipo === 'ENTREGA' && !canWorkUnitDelivery(req.session.user, loan.rows[0])) return res.status(403).json({error:'Esta entrega la tomó otro técnico.'});
   if(tipo === 'RECEPCION' && !canWorkUnitReception(req.session.user, loan.rows[0])) return res.status(403).json({error:'Esta recepción la tomó otro técnico.'});
-  if(tipo === 'ENTREGA' && !clean(loan.rows[0].unidad_asignada)) return res.status(400).json({error:'Primero Mantenimiento debe asignar la unidad.'});
+  if(tipo === 'ENTREGA' && !clean(loan.rows[0].unidad_asignada)) return res.status(400).json({error:'Primero Gerente/Supervisor de Operaciones debe asignar la unidad.'});
   if(tipo === 'RECEPCION' && !['UNIDAD PRESTADA','ENTREGADA','EN_SERVICIO','EN RECEPCION'].includes(String(loan.rows[0].estado||''))) return res.status(400).json({error:'La unidad todavía no está prestada para poder recibirla.'});
   const err=validarChecklistUnidad(b); if(err) return res.status(400).json({error:err});
   let items={}; try{ items=typeof b.items==='string'?JSON.parse(b.items):(b.items||{}); }catch(e){ items={}; }
@@ -1771,7 +1806,7 @@ app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fi
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/percance', requireLogin, uploadImages.fields([{name:'fotos',maxCount:20}]), async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede registrar percance.'});
+  if(!canTakeUnitChecklist(req.session.user)) return res.status(403).json({error:'Solo personal del área Mantenimiento puede registrar percance.'});
   const b=req.body||{};
   if(!clean(b.hechos)) return res.status(400).json({error:'Descripción de hechos obligatoria.'});
   if(!clean(b.firma_tecnico) || !clean(b.firma_mtto)) return res.status(400).json({error:'Firmas obligatorias.'});
@@ -1781,7 +1816,7 @@ app.post('/api/unidad-prestamos/:folio/percance', requireLogin, uploadImages.fie
   await logAction(req.session.user.id,'percance_unidad',{folio:req.params.folio,fotos:fotos.length});
   res.json(r.rows[0]);
 });
-function fuelPdfLabel(pct){ pct=Number(pct||0); if(pct===0)return 'E / 0%'; if(pct===25)return '1/4 / 25%'; if(pct===50)return '1/2 / 50%'; if(pct===75)return '3/4 / 75%'; if(pct===100)return 'F / 100%'; return pct+'%'; }
+function fuelPdfLabel(pct){ pct=Number(pct||0); if(pct<=0)return 'Empty / 0%'; if(pct>=100)return 'Full / 100%'; return pct+'%'; }
 function fuelGaugePdf(pct){ pct=Math.max(0,Math.min(100,Number(pct||0))); const deg=(180 - pct*180/100) * Math.PI/180; const cx=160, cy=150, r=105; const x=cx+r*Math.cos(deg); const y=cy-r*Math.sin(deg); return `<div class="pdf-fuel"><svg viewBox="0 0 320 190" width="320" height="190"><path d="M55 150 A105 105 0 0 1 265 150" fill="none" stroke="#111" stroke-width="14"/><text x="42" y="162" font-size="20" font-weight="700">E</text><text x="72" y="82" font-size="18" font-weight="700">1/4</text><text x="142" y="45" font-size="18" font-weight="700">1/2</text><text x="218" y="82" font-size="18" font-weight="700">3/4</text><text x="270" y="162" font-size="20" font-weight="700">F</text><line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#e51b24" stroke-width="7" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="18" fill="#555" stroke="#222" stroke-width="5"/></svg><h3>Nivel de combustible: ${fuelPdfLabel(pct)}</h3></div>`; }
 app.get('/api/unidad-prestamos/:folio/reporte', requireLogin, async (req,res)=>{
   const folio=req.params.folio;
