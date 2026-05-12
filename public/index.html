@@ -1,164 +1,696 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<title>Control de Unidades y Tool Crib</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MANTENIMIENTO IBS v2</title>
 <style>
-body{font-family:Arial;background:#f2f2f2;margin:0}
-header{background:#000;color:#fff;padding:20px;border-bottom:4px solid orange}
-.container{padding:20px}
-.card{background:#fff;border-radius:12px;padding:20px;margin-bottom:20px}
-input,select,textarea{width:100%;padding:12px;margin-top:5px;margin-bottom:15px}
-button{background:orange;color:#fff;border:none;padding:12px 20px;border-radius:10px;font-weight:bold}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-.badge{background:#eee;padding:8px 12px;border-radius:20px}
+:root{--orange:#ff6a00;--dark:#111;--line:#d8dde3;--bg:#eef1f4;--green:#0f8a4b;--blue:#1769aa;--red:#b42318;--yellow:#b7791f;--purple:#6b46c1}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#1f2328}button{border:0;border-radius:14px;padding:11px 15px;font-weight:900;font-size:14px;cursor:pointer;margin:4px}.btn-orange{background:var(--orange);color:white}.btn-dark{background:#222;color:white}.btn-green{background:var(--green);color:white}.btn-blue{background:var(--blue);color:white}.btn-red{background:var(--red);color:white}.btn-gray{background:#666;color:white}.btn-purple{background:var(--purple);color:white}.btn-light{background:#eef1f4;color:#222;border:1px solid var(--line)}input,select,textarea{width:100%;border:1px solid var(--line);border-radius:14px;padding:12px;font-size:16px;background:white}textarea{min-height:82px;resize:vertical}label{font-weight:900;font-size:13px;color:#555;display:block;margin:10px 0 5px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.muted{color:#666;font-size:13px}.login-page{min-height:100vh;display:grid;grid-template-columns:1.1fr .9fr;background:radial-gradient(circle at 20% 20%, rgba(255,106,0,.35), transparent 28%),linear-gradient(90deg,rgba(0,0,0,.92),rgba(0,0,0,.78),rgba(0,0,0,.46)),url('https://images.unsplash.com/photo-1581092580497-e0d23cbdf1dc?auto=format&fit=crop&w=1800&q=80');background-size:cover;background-position:center}.login-left{display:flex;flex-direction:column;justify-content:center;padding:70px;color:white}.ibs-logo-wrap{background:white;border:4px solid var(--orange);border-radius:18px;padding:10px 18px;width:max-content;box-shadow:0 18px 55px #0008;margin-bottom:34px}.login-title{font-size:54px;line-height:1;margin:0 0 16px;font-weight:900}.login-title strong{color:var(--orange)}.login-subtitle{font-size:20px;color:#e5e5e5;max-width:720px;line-height:1.48}.machine-strip{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:12px;max-width:760px;margin-top:28px}.machine-card{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(5px);border-radius:18px;padding:16px;box-shadow:0 14px 40px #0005}.machine-card .ico{font-size:34px;display:block;margin-bottom:8px}.machine-card b{display:block;color:white}.machine-card small{display:block;color:#ccc;margin-top:5px}.login-right{display:flex;align-items:center;justify-content:center;padding:30px}.login-card{width:100%;max-width:430px;background:rgba(255,255,255,.97);border-radius:28px;padding:30px;box-shadow:0 26px 80px #000a;border-top:9px solid var(--orange)}.system-online{display:flex;align-items:center;gap:8px;font-size:13px;color:#0f8a4b;font-weight:900;margin-bottom:14px}.dot-online{width:10px;height:10px;border-radius:50%;background:#0f8a4b;box-shadow:0 0 0 5px rgba(15,138,75,.12)}.login-card h2{margin:0;font-size:30px}.login-card p{color:#666;margin:8px 0 20px}.login-card button{width:100%;margin-top:14px}.login-footer{text-align:center;margin-top:18px;font-size:12px;color:#777}header{background:#111;color:white;padding:14px 20px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10;border-bottom:4px solid var(--orange);box-shadow:0 7px 22px #0003}.header-logo{background:white;border:3px solid var(--orange);border-radius:14px;padding:6px 10px;color:var(--orange);font-size:22px;font-weight:900}.header-logo img{display:block;width:190px;max-width:45vw;height:auto}.ibs-logo-wrap img{display:block;width:290px;max-width:75vw;height:auto}.header-title h1{margin:0;font-size:24px}.header-title div{font-size:13px;color:#bbb}.topActions{margin-left:auto;display:flex;flex-wrap:wrap;gap:5px}main{padding:18px;max-width:1350px;margin:auto}.hero{background:linear-gradient(120deg,#111 0%,#222 46%,rgba(255,106,0,.88) 100%);color:white;border-radius:26px;padding:24px;margin-bottom:16px;box-shadow:0 13px 35px #0002;position:relative;overflow:hidden}.hero:after{content:'⚙️';position:absolute;right:35px;top:15px;font-size:120px;opacity:.12}.hero h2{margin:0 0 8px;font-size:32px}.hero p{margin:0;color:#e9e9e9}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.tab{background:white;color:#222;border:1px solid var(--line)}.tab.active{background:var(--orange);color:white}.card{background:white;border:1px solid var(--line);border-radius:22px;padding:18px;margin-bottom:16px;box-shadow:0 6px 18px #0001}.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}.kpi{background:#fff;border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 6px 18px #0001}.kpi b{font-size:28px;display:block;color:var(--orange)}.status{display:inline-block;color:white;border-radius:999px;padding:7px 10px;font-weight:900;font-size:12px}.Reportado{background:var(--red)}.Asignado{background:var(--yellow)}.Enatencion{background:var(--blue)}.Pendientevalidacion{background:var(--purple)}.Devuelto{background:#97266d}.Liberado{background:var(--green)}table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top;font-size:14px}th{background:#f8fafc}.empty{padding:22px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:18px;color:#666}.bar{height:10px;border-radius:999px;background:#e2e8f0;overflow:hidden}.bar span{display:block;height:100%;background:var(--orange)}.searchbox{display:flex;gap:10px;align-items:center;margin:12px 0}.searchbox input{flex:1}.asset-results{background:#fff;border:1px solid var(--line);border-radius:16px;max-height:280px;overflow:auto;margin-top:8px}.asset-option{padding:12px;border-bottom:1px solid #eee;cursor:pointer}.asset-option:hover{background:#fff7ef}.asset-option b{color:var(--orange)}.pill{display:inline-block;border-radius:999px;background:#eef1f4;padding:5px 8px;font-size:12px;margin:2px}.selected-asset{background:#fff7ef;border:1px solid #ffc18d;border-radius:16px;padding:12px;margin-top:10px}.time-box-mtto{background:#eef6ff;border:1px solid #b8dcff;border-radius:14px;padding:10px;margin-bottom:8px}.time-box-prod{background:#fff4e6;border:1px solid #ffd59b;border-radius:14px;padding:10px;margin-bottom:8px}.time-box-total{background:#f8fafc;border:1px solid #d8dde3;border-radius:14px;padding:10px}.time-box-mtto b,.time-box-prod b,.time-box-total b{font-size:16px}@media(max-width:950px){.login-page{grid-template-columns:1fr}.login-left{padding:35px 24px 10px}.login-title{font-size:40px}.machine-strip,.kpis,.grid,.grid3,.grid4{grid-template-columns:1fr}.topActions{margin-left:0}header{flex-wrap:wrap}.searchbox{display:block}}
+
+.loading-overlay{position:fixed;inset:0;background:rgba(0,0,0,.68);display:none;align-items:center;justify-content:center;z-index:9999}.loading-box{background:white;color:#222;padding:26px;border-radius:22px;min-width:260px;text-align:center;box-shadow:0 25px 80px #0009;border-top:7px solid var(--orange)}.spinner{width:48px;height:48px;border:5px solid #eee;border-top:5px solid var(--orange);border-radius:50%;margin:0 auto 14px;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}button:disabled{opacity:.65;cursor:not-allowed}.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;z-index:10000;padding:18px}.modal-card{background:#fff;border-radius:24px;padding:22px;max-width:620px;width:100%;box-shadow:0 25px 90px #0009;border-top:8px solid var(--orange)}.modal-card h2{margin:0 0 8px}.modal-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.notice-box{background:#fff7ef;border:1px solid #ffc18d;border-radius:16px;padding:12px;margin-top:10px}
+
+/* MEJORAS AUTORIZADAS: vista más limpia sin quitar funciones */
+.kpi b small{font-size:13px;color:#666;display:block;font-weight:700;margin-top:2px}.time-compact{font-size:18px;font-weight:900;color:#111}.time-detail{font-size:12px;color:#666;margin-top:3px}.stats-list{display:grid;gap:8px}.stat-row{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #eef1f4;padding:7px 0}.stat-row b{color:#222}.stat-row span{background:#fff7ef;border:1px solid #ffc18d;border-radius:999px;padding:3px 8px;font-weight:900;color:#b45309}.user-help{background:#f8fafc;border:1px solid var(--line);border-radius:16px;padding:12px;margin:10px 0}.hidden-for-area{opacity:.72}
+
 </style>
 </head>
 <body>
+<div id="loadingOverlay" class="loading-overlay"><div class="loading-box"><div class="spinner"></div><b id="loadingText">Cargando...</b><div class="muted" style="margin-top:8px">Por favor espera</div></div></div>
 
-<header>
-<h1>CONTROL DE UNIDADES Y TOOL CRIB</h1>
-<p>Mantenimiento IBS</p>
-</header>
+<header id="mainHeader" style="display:none"><div class="header-logo"><img src="/logo-interbandas.png" alt="Interbandas"></div><div class="header-title"><h1>MANTENIMIENTO IBS</h1><div id="userLabel">Sistema interno</div></div><div id="topActions" class="topActions"></div></header>
+<main id="app"></main>
+<script>
+let me=null, activos=[], empleados=[], empleadosReportantes=[], tecnicos=[], gerentes=[], tickets=[], reportes=null, catalogos={sucursales:[],areas:[]}, vista='panel', selectedAsset=null, selectedReporter=null, editingUserId=null;
+const SUCURSALES_LOGIN_BASE=[
+  'CHIHUAHUA','JUAREZ','TORREON','DURANGO','HERMOSILLO','MONTERREY','SALTILLO','CULIACAN','TIJUANA','MEXICALI','OBREGON','GUADALAJARA','MEXICO','QUERETARO','LEON','SAN LUIS POTOSI','PUEBLA','VERACRUZ','MERIDA','TAMPICO'
+];
+let SUCURSALES_LOGIN=[...SUCURSALES_LOGIN_BASE];
+function loginSucursalOptions(){return SUCURSALES_LOGIN.map(s=>`<option value="${esc(s)}">${esc(s)}</option>`).join('');}
+async function cargarSucursalesLogin(){
+  try{
+    const r = await fetch('/api/sucursales-login');
+    if(!r.ok) throw new Error('No se pudieron cargar sucursales');
+    const data = await r.json();
+    const extras = Array.isArray(data.sucursales) ? data.sucursales : [];
+    SUCURSALES_LOGIN = [...new Set([...SUCURSALES_LOGIN_BASE, ...extras].filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  }catch(e){
+    SUCURSALES_LOGIN = [...SUCURSALES_LOGIN_BASE];
+  }
+}
 
-<div class="container">
+const app=document.getElementById('app');
+window.addEventListener('unhandledrejection', ev => {
+  try{ hideLoading(); }catch(e){}
+  console.error(ev.reason);
+});
+window.addEventListener('error', ev => {
+  try{ hideLoading(); }catch(e){}
+  console.error(ev.error || ev.message);
+});
+let loadingCount=0;
+function showLoading(msg='Cargando...'){loadingCount++;const o=document.getElementById('loadingOverlay');const t=document.getElementById('loadingText');if(t)t.textContent=msg;if(o)o.style.display='flex'}
+function hideLoading(){loadingCount=Math.max(0,loadingCount-1);if(loadingCount===0){const o=document.getElementById('loadingOverlay');if(o)o.style.display='none'}}
+async function withLoading(msg, fn){showLoading(msg);try{return await fn()}finally{hideLoading()}}
 
-<div class="card">
-<h2>Solicitud de préstamo</h2>
+function byId(id){return document.getElementById(id)}
+function val(id){const el=byId(id);return el?el.value:''}
+function filesOf(id){const el=byId(id);return el&&el.files?[...el.files]:[]}
 
-<div class="grid">
-<div>
-<label>Empresa</label>
-<input type="text" placeholder="Empresa">
-</div>
+function soloDigitos(v){
+  return String(v||'').replace(/\D/g,'');
+}
+function telefonoWhats(v){
+  let d=soloDigitos(v);
+  if(!d) return '';
+  if(d.length===10) d='52'+d;
+  if(d.length===12 && d.startsWith('52')) return d;
+  if(d.length>=11) return d;
+  return d;
+}
+function mensajeTicket(t, titulo='Ticket de mantenimiento IBS'){
+  return `${titulo}
 
-<div>
-<label>OP / Referencia</label>
-<input type="text" placeholder="OP">
-</div>
+Ticket: ${t.id || ''}
+Activo: ${t.activo || ''} - ${t.activo_descripcion || ''}
+Área: ${t.area || ''}
+Ubicación: ${t.ubicacion || ''}
+Prioridad: ${t.prioridad || ''}
+Tipo falla: ${t.tipo_falla || ''}
+Estado: ${t.estado || ''}
 
-<div>
-<label>Buscar empleado</label>
-<input type="text" placeholder="Número o nombre">
-</div>
+Falla:
+${t.falla || ''}
 
-<div>
-<label>Cantidad de técnicos</label>
-<input type="number">
-</div>
-</div>
+Solicita: ${t.solicitante || ''}
+Tel/ext: ${t.telefono_solicitante || ''}
 
-<label>Foto de OP</label>
-<input type="file">
+Sistema:
+${location.origin}`;
+}
+function buscarTecnico(username){
+  return tecnicos.find(x=>String(x.username||'').toLowerCase()===String(username||'').toLowerCase()) || {};
+}
+function nombreTecnico(username){
+  const t = buscarTecnico(username);
+  return t.name || username || '';
+}
+function telefonoTecnico(username){
+  const t = buscarTecnico(username);
+  return t.telefono || '';
+}
+function mensajeTecnicoAsignado(t){
+  return `MANTENIMIENTO IBS - TICKET ASIGNADO
 
-<label>Número de licencia</label>
-<input type="text">
+Se te asignó un trabajo de mantenimiento.
 
-<label>Foto licencia</label>
-<input type="file">
+Ticket: ${t.id || ''}
+Activo: ${t.activo || ''} - ${t.activo_descripcion || ''}
+Área: ${t.area || ''}
+Ubicación: ${t.ubicacion || ''}
+Prioridad: ${t.prioridad || ''}
+Tipo de falla: ${t.tipo_falla || ''}
 
-<label>¿Lleva remolque?</label>
-<select>
-<option>No</option>
-<option>Sí</option>
-</select>
+Falla reportada:
+${t.falla || ''}
 
-<button>Crear solicitud</button>
+Solicita: ${t.solicitante || ''}
+Tel/ext usuario: ${t.telefono_solicitante || ''}
 
-</div>
+Favor de entrar al sistema, iniciar atención y registrar diagnóstico/solución:
+${location.origin}`;
+}
 
-<div class="card">
-<h2>Estado de solicitudes</h2>
+function gerentesParaTicket(t){
+  const rows = (gerentes || []).filter(g=>{
+    const rol = String(g.role||'').toLowerCase();
+    if(rol==='admin') return true;
+    if(!t || !t.sucursal) return true;
+    return sameKey(g.sucursal,t.sucursal) || esMatriz(g.sucursal) || !g.sucursal;
+  });
+  return rows.length ? rows : (gerentes || []);
+}
+function gerentePrincipal(t){
+  return gerentesParaTicket(t)[0] || {};
+}
+function mensajeGerenteNuevoReporte(t){
+  return `MANTENIMIENTO IBS - NUEVO REPORTE DE FALLA
 
-<table width="100%" border="0">
-<tr>
-<th>Folio</th>
-<th>Empresa</th>
-<th>Estado</th>
-<th>Unidad asignada</th>
-</tr>
+Se levantó un nuevo reporte y requiere asignación de técnico.
 
-<tr>
-<td>UNI-001</td>
-<td>GCC</td>
-<td><span class="badge">SOLICITADO</span></td>
-<td>Pendiente Mtto</td>
-</tr>
-</table>
+Ticket: ${t.id || ''}
+Activo: ${t.activo || ''} - ${t.activo_descripcion || ''}
+Área: ${t.area || ''}
+Sucursal: ${t.sucursal || ''}
+Ubicación: ${t.ubicacion || ''}
+Prioridad: ${t.prioridad || ''}
+Tipo de falla: ${t.tipo_falla || ''}
 
-</div>
+Falla reportada:
+${t.falla || ''}
 
-<div class="card">
-<h2>Checklist minero obligatorio</h2>
+Solicita: ${t.solicitante || ''}
+Tel/ext usuario: ${t.telefono_solicitante || ''}
 
-<h3>Nivel de combustible</h3>
-<p>E=0% | 1/4=25% | 1/2=50% | 3/4=75% | F=100%</p>
+Favor de entrar al sistema para asignar el personal que atenderá el reporte:
+${location.origin}`;
+}
+function abrirAvisoGerente(t){
+  const g = gerentePrincipal(t);
+  abrirWhatsApp(g.telefono || '', mensajeGerenteNuevoReporte(t));
+}
+function cerrarModalGerente(){
+  const m = byId('modalGerente');
+  if(m) m.remove();
+}
+function pantallaAvisoGerente(t){
+  cerrarModalGerente();
+  const g = gerentePrincipal(t);
+  const div = document.createElement('div');
+  div.id = 'modalGerente';
+  div.className = 'modal-backdrop';
+  div.innerHTML = `<div class="modal-card">
+    <h2>Ticket creado correctamente</h2>
+    <p class="muted">Ahora manda el aviso al gerente de mantenimiento para que entre al sistema y asigne al técnico.</p>
+    <div class="notice-box">
+      <b>Ticket:</b> ${esc(t.id)}<br>
+      <b>Gerente/MTTO:</b> ${esc(g.name || g.username || 'Sin gerente configurado')}<br>
+      <b>Activo:</b> ${esc(t.activo || '')} · ${esc(t.activo_descripcion || '')}<br>
+      <b>Área:</b> ${esc(t.area || '')}<br>
+      <b>Sucursal:</b> ${esc(t.sucursal || '')}
+    </div>
+    <div class="modal-actions">
+      <button class="btn-green" type="button" onclick='abrirAvisoGerente(${JSON.stringify(t)})'>Avisar gerente de MTTO</button>
+      <button class="btn-gray" type="button" onclick="cerrarModalGerente()">Cerrar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(div);
+}
 
-<input type="range" min="0" max="100" value="50">
+function mensajeUsuarioConfirmacion(t){
+  return `MANTENIMIENTO IBS - TICKET RECIBIDO
 
-<div class="grid">
+Hola ${t.solicitante || ''}, tu ticket ya fue recibido y asignado.
 
-<div>
-<label>Luces</label>
-<select>
-<option>Sí aplica</option>
-<option>No aplica</option>
-</select>
-</div>
+Ticket: ${t.id || ''}
+Activo: ${t.activo || ''} - ${t.activo_descripcion || ''}
+Área: ${t.area || ''}
+Técnico asignado: ${nombreTecnico(t.tecnico_username) || t.tecnico_username || ''}
 
-<div>
-<label>Intermitentes</label>
-<select>
-<option>Sí aplica</option>
-<option>No aplica</option>
-</select>
-</div>
+Falla reportada:
+${t.falla || ''}
 
-<div>
-<label>Llanta extra</label>
-<select>
-<option>Sí aplica</option>
-<option>No aplica</option>
-</select>
-</div>
+El técnico dará seguimiento y registrará la atención en el sistema.`;
+}
+function abrirWhatsApp(numero, mensaje){
+  const tel=telefonoWhats(numero);
+  const url = tel
+    ? `https://wa.me/${tel}?text=${encodeURIComponent(mensaje)}`
+    : `https://web.whatsapp.com/send?text=${encodeURIComponent(mensaje)}`;
+  window.open(url,'_blank');
+}
+function abrirAvisoTecnico(t){
+  abrirWhatsApp(telefonoTecnico(t.tecnico_username), mensajeTecnicoAsignado(t));
+}
+function abrirConfirmacionUsuario(t){
+  abrirWhatsApp(t.telefono_solicitante || '', mensajeUsuarioConfirmacion(t));
+}
+function cerrarModalAsignacion(){
+  const m = byId('modalAsignacion');
+  if(m) m.remove();
+}
+function pantallaMensajesAsignacion(t){
+  cerrarModalAsignacion();
+  const div = document.createElement('div');
+  div.id = 'modalAsignacion';
+  div.className = 'modal-backdrop';
+  div.innerHTML = `<div class="modal-card">
+    <h2>Ticket asignado correctamente</h2>
+    <p class="muted">Ahora manda los mensajes por WhatsApp. Primero al técnico y después al usuario para confirmar que el ticket fue recibido.</p>
+    <div class="notice-box">
+      <b>Ticket:</b> ${esc(t.id)}<br>
+      <b>Técnico:</b> ${esc(nombreTecnico(t.tecnico_username) || t.tecnico_username || '')}<br>
+      <b>Usuario:</b> ${esc(t.solicitante || '')}<br>
+      <b>Activo:</b> ${esc(t.activo || '')} · ${esc(t.activo_descripcion || '')}
+    </div>
+    <div class="modal-actions">
+      <button class="btn-green" type="button" onclick='abrirAvisoTecnico(${JSON.stringify(t)})'>Mandar WhatsApp al técnico</button>
+      <button class="btn-blue" type="button" onclick='abrirConfirmacionUsuario(${JSON.stringify(t)})'>Confirmar al usuario</button>
+      <button class="btn-gray" type="button" onclick="cerrarModalAsignacion()">Cerrar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(div);
+}
+function btnWhatsTicket(t, titulo='Enviar WhatsApp'){
+  const msg = mensajeTicket(t, titulo);
+  const tel = t.telefono_solicitante || '';
+  return `<button class="btn-green" type="button" onclick='abrirWhatsApp(${JSON.stringify(tel)}, ${JSON.stringify(msg)})'>WhatsApp</button>`;
+}
+function btnAvisosAsignacion(t){
+  if(!t || !t.tecnico_username) return '';
+  return `<div style="margin-top:8px">
+    <button class="btn-green" type="button" onclick='abrirAvisoTecnico(${JSON.stringify(t)})'>Avisar técnico</button>
+  </div>`;
+}
 
-<div>
-<label>Póliza seguro</label>
-<select>
-<option>Sí aplica</option>
-<option>No aplica</option>
-</select>
-</div>
+function esc(s){return String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]))}
+function fmt(d){return d?new Date(d).toLocaleString():'-'}
+function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replaceAll(' ','')}
+function isAdmin(){return me && me.role==='admin'}
+function canExport(){return me && (me.role==='admin' || me.can_export===true)}
+function isGerencia(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
+function esTecnico(){return me && String(me.role||'').toLowerCase()==='tecnico'}
+function puedeGestionarMtto(){return me && ['admin','gerente','mantenimiento','tecnico'].includes(String(me.role||'').toLowerCase())}
+function puedeAceptarTicket(t){return puedeGestionarMtto() && (!t.tecnico_username || String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase() || isGerencia())}
+function sameKey(a,b){return normalize(a)===normalize(b)}
+function esMatriz(s){return sameKey(s,'CHIHUAHUA')}
+function tecnicosParaTicket(t){return tecnicos.filter(x=>sameKey(x.sucursal,t.sucursal)||esMatriz(x.sucursal)||!t.sucursal)}
+function normalize(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+const SUCURSAL_ALIAS_GROUPS_FRONT={
+  'CHIHUAHUA':['CHIH','CHIH.','CHIHUAHUA','CUU','MATRIZ','IBS CHIHUAHUA','PLANTA CHIHUAHUA','SUCURSAL CHIHUAHUA'],
+  'JUAREZ':['JRZ','JUAREZ','JUÁREZ','CD JUAREZ','CD. JUAREZ','CIUDAD JUAREZ','CIUDAD JUÁREZ','SUCURSAL JUAREZ'],
+  'TIJUANA':['TJ','TIJ','TIJUANA','TIJUANA BC','TIJUANA B.C.','BC TIJUANA','SUCURSAL TIJUANA','PLANTA TIJUANA'],
+  'TORREON':['TRC','TORREON','TORREÓN','TORREON COAH','TORREON COAHUILA','SUCURSAL TORREON'],
+  'MEXICALI':['MXL','MEXICALI','SUCURSAL MEXICALI'],
+  'HERMOSILLO':['HMO','HERMOSILLO','SUCURSAL HERMOSILLO'],
+  'MONTERREY':['MTY','MONTERREY','NUEVO LEON','NL','SUCURSAL MONTERREY'],
+  'GUADALAJARA':['GDL','GUADALAJARA','JALISCO','SUCURSAL GUADALAJARA'],
+  'CDMX':['CDMX','MEXICO','MÉXICO','CIUDAD DE MEXICO','CIUDAD DE MÉXICO','DF','DISTRITO FEDERAL'],
+  'PUEBLA':['PUE','PUEBLA'],
+  'QUERETARO':['QRO','QUERETARO','QUERÉTARO'],
+  'LEON':['LEON','LEÓN','LEON GTO','LEÓN GTO'],
+  'SAN LUIS POTOSI':['SLP','SAN LUIS','SAN LUIS POTOSI','SAN LUIS POTOSÍ'],
+  'AGUASCALIENTES':['AGS','AGUASCALIENTES'],
+  'CULIACAN':['CULIACAN','CULIACÁN'],
+  'MERIDA':['MERIDA','MÉRIDA']
+};
+const SUCURSAL_ALIASES_FRONT={};
+Object.entries(SUCURSAL_ALIAS_GROUPS_FRONT).forEach(([canon,aliases])=>{
+  SUCURSAL_ALIASES_FRONT[normalize(canon).replace(/[^a-z0-9]/g,'')]=canon;
+  aliases.forEach(a=>SUCURSAL_ALIASES_FRONT[normalize(a).replace(/[^a-z0-9]/g,'')]=canon);
+});
+function normalizeKey(s){return normalize(s).replace(/[^a-z0-9]/g,'')}
+function canonicalSucursalFront(s){const k=normalizeKey(s);return SUCURSAL_ALIASES_FRONT[k]||String(s||'').toUpperCase().trim()}
+function sameLoose(a,b){return normalizeKey(canonicalSucursalFront(a))===normalizeKey(canonicalSucursalFront(b))}
+function rolActual(){return String(me?.role||'').toLowerCase()}
+function esUsuarioArea(){return ['operaciones','usuario_area','usuario'].includes(rolActual())}
+function puedeVerTodoFrontend(){return ['admin','gerente','mantenimiento'].includes(rolActual())}
+function perteneceASucursalArea(row){
+  if(!me) return false;
+  if(puedeVerTodoFrontend()) return true;
 
-</div>
+  // ACTIVOS/HERRAMIENTAS:
+  // Aquí se filtra SOLO por sucursal.
+  // No por área, porque el Excel puede traer áreas como TOOL CRIB, TALLER, PRODUCCION, etc.
+  // Si filtramos por área, el panel puede decir "315 activos visibles" pero el buscador no despliega nada.
+  return !me.sucursal || sameLoose(row?.sucursal||'', me.sucursal||'');
+}
+function activosVisibles(){return (activos||[]).filter(perteneceASucursalArea)}
+function ticketsVisibles(){return (tickets||[]).filter(t=>{
+  if(!me) return false;
+  if(puedeVerTodoFrontend()) return true;
+  if(rolActual()==='tecnico') return String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase();
+  return sameLoose(t.sucursal||'', me.sucursal||'') && sameLoose(t.area||'', me.area_asignada||'');
+})}
+function fmtMin(min){
+  min = Math.max(0, Number(min||0));
+  const h=Math.floor(min/60), m=min%60;
+  if(h && m) return `${h}h ${String(m).padStart(2,'0')}m`;
+  if(h) return `${h}h`;
+  return `${m}m`;
+}
+function fmtMinDetalle(min){return `${Number(min||0)} min`}
+function displayUserName(e){
+  const n=String(e?.name||'').trim();
+  const u=String(e?.username||'').trim();
+  if(!n || n.toLowerCase()===u.toLowerCase()) return u;
+  return n;
+}
+function topEntries(obj, max=8){
+  return Object.entries(obj||{}).sort((a,b)=>Number(b[1])-Number(a[1])).slice(0,max);
+}
 
-<label>Fotos entrega</label>
-<input type="file" multiple>
+const DEMO_USERS=['demo','test','usuario','prueba','operador','operaciones_demo','demo_area','area_demo','user_demo'];
+function isDemoUser(e){return DEMO_USERS.includes(String(e?.username||'').toLowerCase()) || normalize(e?.name||'').includes('demo');}
+function usuariosReales(rows){return (rows||[]).filter(e=>!isDemoUser(e));}
+function clearFields(ids){ids.forEach(id=>{const el=byId(id); if(!el) return; if(el.type==='checkbox') el.checked=false; else el.value='';});}
+async function api(url,opts={}){
+  const r = await fetch(url,opts);
+  const raw = await r.text();
+  let data = null;
 
-<label>Fotos recepción</label>
-<input type="file" multiple>
+  try{
+    data = raw ? JSON.parse(raw) : null;
+  }catch(e){
+    data = raw;
+  }
 
-<label>Firma técnico</label>
-<button>Firmar</button>
+  if(!r.ok){
+    const msg = (data && data.error) ? data.error : (typeof data === 'string' ? data : 'Error del servidor');
+    throw new Error(msg);
+  }
 
-<label>Firma mantenimiento</label>
-<button>Firmar</button>
+  return data;
+}
+let idleTimer=null;
+function resetIdleTimer(){
+  clearTimeout(idleTimer);
+  if(!me) return;
+  idleTimer=setTimeout(()=>{ alert('Sesión cerrada por inactividad'); salir(); },1000*60*30);
+}
+['click','mousemove','keypress','touchstart','scroll'].forEach(evt=>window.addEventListener(evt,resetIdleTimer,{passive:true}));
+async function boot(){try{let r=await api('/api/me');me=r.user;if(me){resetIdleTimer();render();}else login()}catch(e){login()}}
+async function login(){await cargarSucursalesLogin();document.getElementById('mainHeader').style.display='none';app.style.maxWidth='none';app.style.padding='0';app.innerHTML=`<section class="login-page"><div class="login-left"><div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas"></div><h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1><p class="login-subtitle">Control general de tickets, activos, empleados, tiempos muertos y reportes internos por sucursal.</p><div class="machine-strip"><div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Activos industriales</small></div><div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario por sucursal</small></div><div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div><div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Tiempos y reportes</small></div></div></div><div class="login-right"><div class="login-card"><div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div><h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p><label>Usuario</label><input id="u" autocomplete="username" placeholder="Usuario"><label>Contraseña</label><input id="p" type="password" autocomplete="current-password" placeholder="Contraseña"><label>Sucursal</label><select id="loginSucursal"><option value="">Selecciona sucursal</option>${loginSucursalOptions()}</select><button class="btn-orange" onclick="doLogin()">Entrar al sistema</button><div class="login-footer">Interbandas · Mantenimiento IBS<br>Usuarios separados por sucursal</div></div></div></section>`;setTimeout(()=>document.getElementById('u').focus(),50)}
+async function doLogin(){const username=val('u').trim();const password=val('p');const sucursal=val('loginSucursal');if(!username)return alert('Escribe el usuario');if(!password)return alert('Escribe la contraseña');if(!sucursal)return alert('Selecciona la sucursal');showLoading('Iniciando sesión...');try{const r=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,sucursal})});me=r.user;document.getElementById('p').value='';resetIdleTimer();render()}catch(e){alert('No entró: '+e.message)}finally{hideLoading()}}
+async function salir(){try{await api('/api/logout',{method:'POST'})}catch(e){}me=null;selectedAsset=null;login()}
+async function loadAll(){const [b,ts,rs,cat]=await Promise.all([api('/api/bootstrap'),api('/api/tickets'),api('/api/reportes'),api('/api/catalogos')]);activos=b.activos;empleados=b.empleados;empleadosReportantes=b.empleados_reportantes||[];tecnicos=b.tecnicos;gerentes=b.gerentes||[];tickets=ts;reportes=rs;catalogos=cat||{sucursales:[],areas:[]}}
+async function render(){if(!me)return login();showLoading('Cargando sistema...');try{document.getElementById('mainHeader').style.display='flex';document.getElementById('userLabel').textContent=`${me.name||me.username} · ${me.role||''}`;document.getElementById('topActions').innerHTML=`<button class="btn-gray" onclick="render()">Actualizar</button>${canExport()?`<button class="btn-dark" onclick="location.href='/api/export/excel'">Exportar Excel</button>`:''}<button class="btn-red" onclick="salir()">Salir</button>`;app.style.maxWidth='1350px';app.style.padding='18px';await loadAll();if(!isAdmin() && (vista==='empleados' || vista==='usuarios')) vista='panel';
+app.innerHTML=`${hero()}${me.must_change_password?changePassCard():''}${tabs()}${vista==='panel'?panel():vista==='tickets'?ticketsView():vista==='activos'?activosView():vista==='empleados'?empleadosView():vista==='reportes'?reportesView():usuariosView()}`;}finally{hideLoading()}}
+function hero(){return `<section class="hero"><h2>Panel de mantenimiento industrial</h2><p>Sucursal: <b>${esc(me.sucursal||'Todas')}</b> · Área: <b>${esc(me.area_asignada||'Todas')}</b> · Usuarios por área, empleados solo como reportantes y apoyo matriz Chihuahua.</p></section>`}
+function tabs(){return `<div class="tabs"><button class="tab ${vista==='panel'?'active':''}" onclick="vista='panel';render()">Panel</button><button class="tab ${vista==='tickets'?'active':''}" onclick="vista='tickets';render()">Tickets</button><button class="tab ${vista==='activos'?'active':''}" onclick="vista='activos';render()">Activos</button>${isAdmin()?`<button class="tab ${vista==='empleados'?'active':''}" onclick="vista='empleados';render()">Empleados</button><button class="tab ${vista==='usuarios'?'active':''}" onclick="vista='usuarios';render()">Usuarios</button>`:''}<button class="tab ${vista==='reportes'?'active':''}" onclick="vista='reportes';render()">Reportes</button></div>`}
+function changePassCard(){return `<div class="card" style="border:2px solid var(--orange)">
+  <h2>Cambio de contraseña requerido</h2>
+  <p class="muted">Escribe tu contraseña actual y una nueva contraseña de mínimo 6 caracteres.</p>
+  <div class="grid3">
+    <input id="oldPass" type="password" placeholder="Contraseña actual" autocomplete="current-password">
+    <input id="newPass" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
+    <input id="newPass2" type="password" placeholder="Confirmar nueva contraseña" autocomplete="new-password">
+  </div>
+  <button id="btnChangePass" type="button" class="btn-orange" onclick="changePass()">Cambiar contraseña</button>
+</div>`}
+async function changePass(){
+  const oldPassword=val('oldPass').trim();
+  const newPassword=val('newPass').trim();
+  const newPassword2=val('newPass2').trim();
+  const btn=byId('btnChangePass');
+  if(!oldPassword) return alert('Escribe tu contraseña actual');
+  if(newPassword.length < 6) return alert('La nueva contraseña debe tener mínimo 6 caracteres');
+  if(newPassword !== newPassword2) return alert('Las contraseñas no coinciden');
+  showLoading('Cambiando contraseña...');
+  if(btn){btn.disabled=true;btn.textContent='Guardando...';}
+  try{
+    const r=await api('/api/change-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({oldPassword,newPassword})});
+    me = r.user || (await api('/api/me')).user || me;
+    alert('Contraseña actualizada correctamente');
+    await render();
+  }catch(e){
+    alert('No se pudo cambiar la contraseña: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='Cambiar contraseña';}
+    hideLoading();
+  }
+}
+function kpis(){return `<div class="kpis"><div class="kpi"><b>${reportes.totalTickets}</b>Tickets</div><div class="kpi"><b>${reportes.abiertos}</b>Abiertos</div><div class="kpi"><b>${reportes.totalActivos}</b>Activos visibles</div><div class="kpi"><b>${reportes.totalEmpleados}</b>Usuarios</div><div class="kpi"><b>${fmtMin(reportes.muertoTotalMin||0)}<small>${fmtMinDetalle(reportes.muertoTotalMin||0)}</small></b>Muerto total</div><div class="kpi"><b>${fmtMin(reportes.mttoMin||0)}<small>${fmtMinDetalle(reportes.mttoMin||0)}</small></b>MTTO</div><div class="kpi"><b>${fmtMin(reportes.produccionMin||0)}<small>${fmtMinDetalle(reportes.produccionMin||0)}</small></b>Operaciones</div></div>`}
+function panel(){const rows=ticketsVisibles();return `${kpis()}${crearTicketCard()}${tablaTickets(rows.slice(0,10))}`}
+function assetSearchBlock(){return `<label>Buscar activo / herramienta</label><input id="assetQuery" placeholder="Busca por número, descripción, área, tipo, sucursal, ubicación, marca, usuario o estatus" oninput="assetSuggest(this.value)"><div id="assetResults" class="asset-results" style="display:none"></div><div id="assetSelected">${selectedAsset?selectedAssetHtml(selectedAsset):''}</div>`}
+function selectedAssetHtml(a){return `<div class="selected-asset"><b>${esc(a.numero)}</b> · ${esc(a.descripcion)}<br><span class="pill">Área: ${esc(a.area)}</span><span class="pill">Tipo: ${esc(a.tipo)}</span><span class="pill">Sucursal: ${esc(a.sucursal)}</span><span class="pill">Ubicación: ${esc(a.ubicacion)}</span><span class="pill">Usuario: ${esc(a.usuario)}</span></div>`}
+function textoBusquedaActivo(a){
+  return normalize([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' '));
+}
+function coincideBusquedaActivo(a, q){
+  const txt = textoBusquedaActivo(a);
+  const tokens = normalize(q).split(/\s+/).filter(Boolean);
+  if(!tokens.length) return false;
+  // Flexible: no exige que venga la frase exacta junta.
+  // Ejemplo: "pulidor neumatico" encuentra "PULIDOR / LIJADORA NEUMÁTICA".
+  return tokens.every(t => txt.includes(t));
+}
+function assetSuggest(q){
+  const box=document.getElementById('assetResults');
+  if(!box)return;
+  if(normalize(q).trim().length<1){box.style.display='none';box.innerHTML='';return}
+  const rows=activosVisibles().filter(a=>coincideBusquedaActivo(a,q)).slice(0,25);
+  box.style.display='block';
+  box.innerHTML=rows.length
+    ? rows.map((a,i)=>`<div class="asset-option" onclick="selectAsset(${a.id})"><b>${esc(a.numero)}</b> · ${esc(a.descripcion)}<br><span class="muted">${esc(a.area)} · ${esc(a.tipo)} · ${esc(a.sucursal)} · ${esc(a.ubicacion)} · ${esc(a.usuario)}</span></div>`).join('')
+    : `<div class="asset-option muted">Sin resultados en tu sucursal. Prueba con número, marca, ubicación o una sola palabra.</div>`;
+}
+function selectAsset(id){selectedAsset=activosVisibles().find(a=>String(a.id)===String(id));if(!selectedAsset){alert('Este activo no pertenece a tu sucursal.');return;}document.getElementById('assetResults').style.display='none';document.getElementById('assetQuery').value=selectedAsset.numero+' · '+selectedAsset.descripcion;document.getElementById('assetSelected').innerHTML=selectedAssetHtml(selectedAsset)}
+function reportanteSuggest(q){
+  const box=document.getElementById('reportanteResults');
+  if(!box)return;
+  const nq=normalize(q);
+  if(nq.length<1){box.style.display='none';box.innerHTML='';return}
+  const rows=empleadosReportantes.filter(e=>normalize([e.numero_empleado,e.nombre,e.sucursal,e.area,e.puesto,e.telefono,e.correo].join(' ')).includes(nq)).slice(0,25);
+  box.style.display='block';
+  box.innerHTML=rows.length?rows.map(e=>`<div class="asset-option" onclick="selectReportante(${e.id})"><b>${esc(e.nombre)}</b> · ${esc(e.numero_empleado||'Sin número')}<br><span class="muted">${esc(e.sucursal||'')} · ${esc(e.area||'')} · ${esc(e.puesto||'')} ${e.telefono?' · '+esc(e.telefono):''}</span></div>`).join(''):`<div class="asset-option muted">Sin resultados. Puedes escribir el nombre manualmente.</div>`;
+}
+function selectReportante(id){
+  selectedReporter=empleadosReportantes.find(e=>String(e.id)===String(id));
+  if(!selectedReporter)return;
+  const box=document.getElementById('reportanteResults');
+  if(box)box.style.display='none';
+  const s=document.getElementById('solicitante');
+  const n=document.getElementById('empSol');
+  const t=document.getElementById('telSol');
+  if(s)s.value=selectedReporter.nombre||'';
+  if(n)n.value=selectedReporter.numero_empleado||'';
+  if(t && !t.value)t.value=selectedReporter.telefono||'';
+}
 
-</div>
+function crearTicketCard(){return `<div class="card"><h2>Reportar falla</h2>${assetSearchBlock()}<div class="grid3"><div><label>Persona que reporta</label><input id="solicitante" placeholder="Busca por nombre o número" oninput="reportanteSuggest(this.value)" autocomplete="off"><div id="reportanteResults" class="asset-results" style="display:none"></div></div><div><label>Teléfono/extensión</label><input id="telSol" placeholder="WhatsApp, teléfono o extensión"></div><div><label>Prioridad</label><select id="prioridad"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div><div><label>Tipo de falla</label><select id="tipoFalla"><option>Mecánica</option><option>Eléctrica</option><option>Neumática</option><option>Ajuste</option><option>Operador</option><option>Otro</option></select></div><div><label>Número empleado</label><input id="empSol" placeholder="Opcional"></div></div><label>Falla detectada</label><textarea id="falla" placeholder="Describe la falla..."></textarea><label>Fotos de evidencia inicial</label><input id="fotosReporte" type="file" accept="image/*" multiple><button class="btn-orange" onclick="crearTicket()">Crear ticket</button></div>`}
+async function crearTicket(){
+  try{
+    if(!selectedAsset){
+      const q=val('assetQuery');
+      const nq=normalize(q);
+      selectedAsset = activosVisibles().find(a=>normalize([a.numero,a.descripcion].join(' ')).includes(nq));
+    }
+    if(!selectedAsset) return alert('Selecciona un activo desde la búsqueda');
+    if(!val('falla').trim()) return alert('Describe la falla');
+    showLoading('Creando ticket...');
+    const fd=new FormData();
+    fd.append('activo',selectedAsset.numero||'');
+    fd.append('activo_descripcion',selectedAsset.descripcion||'');
+    fd.append('area',selectedAsset.area || me.area_asignada || '');
+    fd.append('sucursal',selectedAsset.sucursal || me.sucursal || 'SIN SUCURSAL');
+    fd.append('ubicacion',selectedAsset.ubicacion||'');
+    fd.append('solicitante',val('solicitante'));
+    fd.append('empleado_solicitante',val('empSol'));
+    fd.append('telefono_solicitante',val('telSol'));
+    fd.append('falla',val('falla'));
+    fd.append('prioridad',val('prioridad')||'Normal');
+    fd.append('tipo_falla',val('tipoFalla'));
+    filesOf('fotosReporte').forEach(f=>fd.append('fotos_reporte',f));
+    const nuevo = await api('/api/tickets',{method:'POST',body:fd});
+    selectedAsset=null;
+    selectedReporter=null;
+    await render();
+    if(nuevo) pantallaAvisoGerente(nuevo);
+  }catch(e){
+    alert('Error al crear ticket: '+e.message);
+  }finally{
+    hideLoading();
+  }
+}
+function ticketsView(){return `${crearTicketCard()}<div class="card"><h2>Buscar tickets</h2><div class="searchbox"><input id="qTickets" oninput="filterTickets(this.value)" placeholder="Buscar por ticket, activo, estado, sucursal, área, falla o solicitante"></div><div id="ticketsTable">${tablaTickets(ticketsVisibles())}</div></div>`}
+function filterTickets(q){const nq=normalize(q);const rows=ticketsVisibles().filter(t=>normalize([t.id,t.activo,t.activo_descripcion,t.area,t.sucursal,t.estado,t.falla,t.solicitante].join(' ')).includes(nq));document.getElementById('ticketsTable').innerHTML=tablaTickets(rows)}
 
-<div class="card">
-<h2>Reporte percance / daño</h2>
+function puedeLiberarTicket(t){
+  if(!me || !t) return false;
+  const rol=String(me.role||'').toLowerCase();
 
-<textarea rows="6" placeholder="Descripción de hechos"></textarea>
+  if(rol==='admin') return true;
+  if(rol==='tecnico') return false;
 
-<label>Fotos daño</label>
-<input type="file" multiple>
+  const mismaArea = normalize(me.area_asignada||'') && normalize(t.area||'') && normalize(me.area_asignada||'')===normalize(t.area||'');
+  const mismaSucursal = !t.sucursal || !me.sucursal || normalize(me.sucursal||'')===normalize(t.sucursal||'');
 
-<button>Generar PDF</button>
+  return mismaArea && mismaSucursal;
+}
 
-</div>
+function acciones(t){
+  let html='';
+  const tecs=tecnicosParaTicket(t);
+  if(t.estado==='Reportado'){
+    html+=`${puedeGestionarMtto()?`<select id="tec_${t.id}">${tecs.map(x=>`<option value="${esc(x.username)}">${esc(x.name)} · ${esc(x.sucursal||'')} ${x.telefono?' · '+esc(x.telefono):''}</option>`).join('')}</select><button class="btn-blue" onclick="asignar('${t.id}')">Asignar y notificar</button>`:'<span class="muted">Esperando asignación de mantenimiento</span>'}`;
+  }
+  if(t.estado==='Asignado'){
+    html+=`${puedeAceptarTicket(t)?`<button class="btn-blue" onclick="aceptar('${t.id}')">Aceptar trabajo</button>${btnAvisosAsignacion(t)}`:'<span class="muted">Trabajo asignado. Esperando que el técnico acepte.</span>'}`;
+  }
+  if(t.estado==='En atención'){
+    html+=`${puedeAceptarTicket(t)?`${btnAvisosAsignacion(t)}<textarea id="diag_${t.id}" placeholder="Diagnóstico"></textarea><textarea id="sol_${t.id}" placeholder="Solución"></textarea><label>Fotos del trabajo realizado</label><input id="fotosTrabajo_${t.id}" type="file" accept="image/*" multiple><button class="btn-green" onclick="terminar('${t.id}')">Técnico libera</button>`:'<span class="muted">Técnico trabajando en ello.</span>'}`;
+  }
+  if(t.estado==='Pendiente validación'){
+    html+=`${btnAvisosAsignacion(t)}<button class="btn-green" onclick="liberar('${t.id}')">Operación libera</button><button class="btn-red" onclick="devolver('${t.id}')">Operación devuelve</button>`;
+  }
+  return html||'<span class="muted">Sin acciones</span>'
+}
+async function asignar(id){
+  showLoading('Asignando ticket...');
+  try{
+    const r = await api(`/api/tickets/${id}/asignar`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tecnico_username:val('tec_'+id)})
+    });
+    await render();
+    if(r && r.ticket) pantallaMensajesAsignacion(r.ticket);
+  }
+  catch(e){alert(e.message)}
+  finally{hideLoading()}
+}
+async function iniciar(id){
+  showLoading('Iniciando atención...');
+  try{await api(`/api/tickets/${id}/iniciar`,{method:'POST'});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function aceptar(id){
+  showLoading('Aceptando trabajo...');
+  try{await api(`/api/tickets/${id}/iniciar`,{method:'POST'});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function terminar(id){
+  showLoading('Guardando trabajo realizado...');
+  try{
+    const fd=new FormData();
+    fd.append('diagnostico',val('diag_'+id));
+    fd.append('solucion',val('sol_'+id));
+    filesOf('fotosTrabajo_'+id).forEach(f=>fd.append('fotos_trabajo',f));
+    await api(`/api/tickets/${id}/terminar`,{method:'POST',body:fd});
+    await render();
+  }catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function liberar(id){
+  showLoading('Liberando equipo...');
+  try{await api(`/api/tickets/${id}/liberar`,{method:'POST'});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function devolver(id){
+  showLoading('Devolviendo ticket...');
+  try{await api(`/api/tickets/${id}/devolver`,{method:'POST'});await render();}
+  catch(e){alert(e.message)}finally{hideLoading()}
+}
+function fotosHtml(arr){
+  let fotos = [];
+  try{ fotos = Array.isArray(arr) ? arr : JSON.parse(arr || '[]'); }catch(e){ fotos=[]; }
+  if(!fotos.length) return '';
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${fotos.map(p=>`<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" style="width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid #ddd"></a>`).join('')}</div>`;
+}
+function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio atención: ${fmt(t.iniciado)}</span><br><span class="muted">Técnico libera: ${fmt(t.terminado)}</span><br><span class="muted">Operación libera: ${fmt(t.liberado)}</span></td><td><div class="time-box-total"><b>Total muerto</b><br><span class="time-compact">${fmtMin(t.tiempos.muertoTotalMin)}</span><div class="time-detail">${fmtMinDetalle(t.tiempos.muertoTotalMin)}</div></div><div class="time-box-mtto"><b>MTTO</b><br>${fmtMin(t.tiempos.mttoMin)} <span class="muted">(${fmtMinDetalle(t.tiempos.mttoMin)})</span></div><div class="time-box-prod"><b>Operaciones</b><br>${fmtMin(t.tiempos.produccionMin)} <span class="muted">(${fmtMinDetalle(t.tiempos.produccionMin)})</span></div></td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}</td></tr>`).join('')}</tbody></table>`}
+function activosView(){return `<div class="card"><h2>Importar activos desde Excel</h2><p class="muted">Acepta el formato ACTIVOS MATRIZ - SUCURSALES. Solo toma: NUM ACTIVO, TIPO, ESTATUS, DESCRIPCION, MARCA, MODELO, SUCURSAL, AREA, UBICACION y USUARIO. Ignora costos, facturas, fechas y demás columnas.</p>${isAdmin()?`<input type="file" id="excelActivos" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/activos','excelActivos')">Importar activos</button>`:'<p class="muted">Solo admin puede importar.</p>'}</div>${isAdmin()?`<div class="card"><h2>Agregar activo manual</h2><div class="grid4"><input id="aNum" placeholder="Número"><input id="aDesc" placeholder="Descripción"><input id="aArea" placeholder="Área"><select id="aTipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select><input id="aSuc" placeholder="Sucursal"><input id="aUbi" placeholder="Ubicación"><input id="aMarca" placeholder="Marca"><input id="aModelo" placeholder="Modelo"><input id="aUsuario" placeholder="Usuario responsable"><input id="aEstatus" placeholder="Estatus" value="VIGENTE"></div><button class="btn-orange" onclick="agregarActivo()">Guardar activo</button></div>`:''}<div class="card"><h2>Activos</h2><div class="searchbox"><input id="qActivos" oninput="filterActivos(this.value)" placeholder="Buscar por palabra clave: activo, descripción, área, tipo, sucursal, ubicación, marca, usuario, estatus"></div><div id="activosTable">${tablaActivos(activosVisibles())}</div></div>`}
+async function importar(endpoint,inputId){showLoading('Importando Excel...');try{let file=document.getElementById(inputId).files[0];if(!file)return alert('Selecciona un Excel');let fd=new FormData();fd.append('archivo',file);let r=await api(endpoint,{method:'POST',body:fd});alert(`Importado\nAgregados: ${r.agregados}\nActualizados: ${r.actualizados}\nOmitidos: ${r.omitidos}`);render()}catch(e){alert('Error: '+e.message)}finally{hideLoading()}}
+async function agregarActivo(){if(!isAdmin()) return alert('Solo administrador puede agregar activos');await api('/api/activos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numero:aNum.value,descripcion:aDesc.value,area:aArea.value,tipo:aTipo.value,sucursal:aSuc.value,ubicacion:aUbi.value,marca:aMarca.value,modelo:aModelo.value,usuario:aUsuario.value,estatus:aEstatus.value})});render()}
+function filterActivos(q){const nq=normalize(q);const rows=activosVisibles().filter(a=>normalize([a.numero,a.descripcion,a.area,a.tipo,a.sucursal,a.ubicacion,a.marca,a.modelo,a.usuario,a.estatus].join(' ')).includes(nq));document.getElementById('activosTable').innerHTML=tablaActivos(rows)}
+function tablaActivos(rows){if(!rows.length)return '<div class="empty">Sin activos.</div>';return `<table><thead><tr><th>Número</th><th>Descripción</th><th>Área</th><th>Tipo</th><th>Sucursal</th><th>Ubicación</th><th>Marca/Modelo</th><th>Usuario</th><th>Estatus</th></tr></thead><tbody>${rows.map(a=>`<tr><td><b>${esc(a.numero)}</b></td><td>${esc(a.descripcion)}</td><td>${esc(a.area)}</td><td>${esc(a.tipo)}</td><td>${esc(a.sucursal)}</td><td>${esc(a.ubicacion)}</td><td>${esc(a.marca)}<br>${esc(a.modelo)}</td><td>${esc(a.usuario)}</td><td>${esc(a.estatus)}</td></tr>`).join('')}</tbody></table>`}
+function empleadosView(){return `<div class="card"><h2>Empleados reportantes</h2><p class="muted">Estos empleados no tienen acceso al sistema. Solo aparecen para seleccionar su nombre al crear un ticket.</p>${isAdmin()?`<input type="file" id="excelEmpleados" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/empleados','excelEmpleados')">Importar empleados reportantes</button>`:''}</div><div class="card"><h2>Listado de empleados reportantes</h2><div class="searchbox"><input id="qEmp" oninput="filterEmpleados(this.value)" placeholder="Buscar por nombre, número, sucursal, área, puesto, teléfono o correo"></div><div id="empTable">${tablaEmpleados(empleadosReportantes)}</div></div>`}
+function filterEmpleados(q){const nq=normalize(q);const rows=empleadosReportantes.filter(e=>normalize([e.nombre,e.numero_empleado,e.sucursal,e.area,e.puesto,e.telefono,e.correo,e.status].join(' ')).includes(nq));document.getElementById('empTable').innerHTML=tablaEmpleados(rows)}
+function tablaEmpleados(rows){if(!rows.length)return '<div class="empty">Sin empleados reportantes.</div>';return `<table><thead><tr><th>Empleado</th><th>Número</th><th>Sucursal</th><th>Área</th><th>Puesto</th><th>Teléfono</th><th>Correo</th></tr></thead><tbody>${rows.map(e=>`<tr><td><b>${esc(e.nombre)}</b></td><td>${esc(e.numero_empleado)}</td><td>${esc(e.sucursal)}</td><td>${esc(e.area)}</td><td>${esc(e.puesto)}</td><td>${esc(e.telefono)}</td><td>${esc(e.correo)}</td></tr>`).join('')}</tbody></table>`}
 
-</div>
+function catalogoOptions(tipo, selected=''){
+  const rows = tipo === 'sucursal' ? (catalogos.sucursales||[]) : (catalogos.areas||[]);
+  const actual = String(selected||'').trim();
+  const extra = actual && !rows.some(x=>sameLoose(x,actual)) ? [actual] : [];
+  return [...extra,...rows].map(x=>`<option value="${esc(x)}" ${sameLoose(x,actual)?'selected':''}>${esc(x)}</option>`).join('');
+}
+function sucursalSelect(id, selected=''){
+  const actuales = Array.isArray(catalogos.sucursales) ? catalogos.sucursales : [];
+  const base = [...new Set([...SUCURSALES_LOGIN, ...actuales])];
+  const oldCat = catalogos.sucursales;
+  catalogos.sucursales = base;
+  const html = `<select id="${id}"><option value="">Selecciona sucursal</option>${catalogoOptions('sucursal', selected)}</select>`;
+  catalogos.sucursales = oldCat;
+  return html;
+}
+function areaSelect(id, selected=''){
+  return `<select id="${id}"><option value="">Selecciona área</option>${catalogoOptions('area', selected)}</select>`;
+}
 
+function usuariosView(){return `<div class="card"><h2>Usuarios con acceso al sistema</h2><p class="muted">Aquí solo van admin, gerentes, mantenimiento, técnicos y usuarios de área. Para empleados que solo reportan, usa la pestaña Empleados.</p></div>${userFormCard()}<div id="editUserCard">${editingUserId?editUserCard(editingUserId):''}</div><div class="card"><h2>Usuarios</h2><div class="searchbox"><input id="qUsers" oninput="filterUsuarios(this.value)" placeholder="Buscar usuario por nombre, usuario, número, rol, área, sucursal o estado"></div><div id="usersTable">${tablaUsuarios(usuariosReales(empleados))}</div></div>`}
+function userFormCard(){return `<div class="card"><h2>Crear usuario de área, técnico o gerente</h2><div class="user-help"><b>Usuario de área:</b> llena Usuario, Contraseña, Rol operaciones, Sucursal y Área. Ahora la sucursal y el área salen de los datos reales del sistema y se guardan normalizadas para que no falle por mayúsculas, acentos o espacios.<br><b>Mantenimiento/técnico/gerente:</b> también puedes llenar nombre, número, teléfono y correo porque son usuarios independientes.</div><div class="grid4"><input id="eUser" autocomplete="off" placeholder="Usuario"><input id="ePass" type="password" autocomplete="new-password" placeholder="Contraseña temporal"><select id="eRole" onchange="ajustarFormularioUsuario()"><option value="operaciones">usuario_area / operaciones</option><option value="tecnico">tecnico</option><option value="mantenimiento">mantenimiento</option><option value="gerente">gerente</option><option value="admin">admin</option></select>${sucursalSelect('eSuc')}${areaSelect('eArea')}<input id="eName" class="hidden-for-area" autocomplete="off" placeholder="Nombre opcional / requerido para MTTO"><input id="eNum" class="hidden-for-area" autocomplete="off" placeholder="Número empleado opcional"><input id="eTel" class="hidden-for-area" autocomplete="off" placeholder="Teléfono MTTO"><input id="eMail" class="hidden-for-area" autocomplete="off" placeholder="Correo MTTO"></div><button class="btn-orange" onclick="crearUsuario()">Crear usuario</button><button class="btn-light" onclick="limpiarFormularioUsuario()">Limpiar campos</button></div>`}
+function editUserCard(id){const e=empleados.find(x=>String(x.id)===String(id)); if(!e)return ''; return `<div class="card" style="border:2px solid var(--orange)"><h2>Editar usuario</h2><p class="muted">Aquí puedes corregir sucursal y área. Si el usuario no tiene sucursal correcta, no verá sus máquinas/herramientas para crear tickets.</p><div class="grid4"><input id="edNum" autocomplete="off" placeholder="Número empleado" value="${esc(e.numero_empleado)}"><input id="edUser" autocomplete="off" placeholder="Usuario" value="${esc(e.username)}"><input id="edName" autocomplete="off" placeholder="Nombre" value="${esc(e.name)}"><select id="edRole"><option value="operaciones" ${e.role==='operaciones'?'selected':''}>usuario_area / operaciones</option><option value="tecnico" ${e.role==='tecnico'?'selected':''}>tecnico</option><option value="mantenimiento" ${e.role==='mantenimiento'?'selected':''}>mantenimiento</option><option value="gerente" ${e.role==='gerente'?'selected':''}>gerente</option><option value="admin" ${e.role==='admin'?'selected':''}>admin</option></select><select id="edStatus"><option value="activo" ${e.status==='activo'?'selected':''}>activo</option><option value="inactivo" ${e.status==='inactivo'?'selected':''}>inactivo</option></select>${areaSelect('edArea', e.area_asignada)}${sucursalSelect('edSuc', e.sucursal)}<input id="edTel" autocomplete="off" placeholder="Teléfono" value="${esc(e.telefono)}"><input id="edMail" autocomplete="off" placeholder="Correo" value="${esc(e.correo)}"><label style="display:flex;gap:8px;align-items:center;margin:0"><input id="edExport" type="checkbox" style="width:auto" ${e.can_export?'checked':''}> Puede exportar Excel</label></div><button class="btn-green" onclick="guardarEdicionUsuario(${e.id})">Guardar cambios</button><button class="btn-light" onclick="cancelarEdicionUsuario()">Cancelar</button></div>`}
+function ajustarFormularioUsuario(){
+  const role=String(val('eRole')||'').toLowerCase();
+  const esArea=['operaciones','usuario_area','usuario'].includes(role);
+  ['eName','eNum','eTel','eMail'].forEach(id=>{const el=byId(id); if(el) el.classList.toggle('hidden-for-area', esArea);});
+}
+function limpiarFormularioUsuario(){clearFields(['eNum','eUser','eName','ePass','eArea','eSuc','eTel','eMail']); const r=byId('eRole'); if(r)r.value='operaciones';}
+async function crearUsuario(){try{showLoading('Creando usuario...');const role=val('eRole');const esArea=['operaciones','usuario_area','usuario'].includes(String(role||'').toLowerCase());const username=val('eUser').trim();const payload={numero_empleado:esArea?'':val('eNum'),username,name:esArea?(val('eName').trim()||username):val('eName'),password:val('ePass')||'Temp1234',role,area_asignada:val('eArea'),sucursal:val('eSuc'),telefono:esArea?'':val('eTel'),correo:esArea?'':val('eMail')};await api('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});alert('Usuario creado. Tendrá que cambiar contraseña al entrar.');editingUserId=null;limpiarFormularioUsuario();await render()}catch(e){alert('No se pudo crear usuario: '+e.message)}finally{hideLoading()}}
+function filterUsuarios(q){const nq=normalize(q);const rows=usuariosReales(empleados).filter(e=>normalize([e.name,e.username,e.numero_empleado,e.role,e.area_asignada,e.sucursal,e.status].join(' ')).includes(nq));document.getElementById('usersTable').innerHTML=tablaUsuarios(rows)}
+function tablaUsuarios(rows){rows=usuariosReales(rows);if(!rows.length)return '<div class="empty">Sin usuarios.</div>';return `<table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Exporta</th><th>Sucursal</th><th>Área</th><th>Contacto</th><th>Acciones</th></tr></thead><tbody>${rows.map(e=>`<tr><td><b>${esc(displayUserName(e))}</b>${e.numero_empleado?'<br>'+esc(e.numero_empleado):''}</td><td>${esc(e.username)}</td><td>${esc(e.role)}</td><td>${esc(e.status)}${e.must_change_password?' · cambia pass':''}</td><td>${e.can_export?'Sí':'No'}</td><td><b>${esc(e.sucursal||'SIN SUCURSAL')}</b></td><td>${esc(e.area_asignada)}</td><td>${esc(e.telefono)}<br>${esc(e.correo)}</td><td><button class="btn-blue" onclick="editarUsuario(${e.id})">Editar</button><button class="btn-purple" onclick="resetPass(${e.id})">Reset pass</button><button class="btn-red" onclick="eliminarUsuario(${e.id})">Eliminar</button></td></tr>`).join('')}</tbody></table>`}
+function editarUsuario(id){editingUserId=id; const box=byId('editUserCard'); if(box){box.innerHTML=editUserCard(id); box.scrollIntoView({behavior:'smooth',block:'start'});}else render();}
+function cancelarEdicionUsuario(){editingUserId=null; const box=byId('editUserCard'); if(box)box.innerHTML='';}
+async function guardarEdicionUsuario(id){try{showLoading('Guardando usuario...');await api('/api/users/'+id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({numero_empleado:val('edNum'),username:val('edUser'),name:val('edName'),role:val('edRole'),status:val('edStatus'),area_asignada:val('edArea'),sucursal:val('edSuc'),telefono:val('edTel'),correo:val('edMail'),can_export:!!(byId('edExport')&&byId('edExport').checked)})});alert('Usuario actualizado');editingUserId=null;await render()}catch(e){alert('No se pudo actualizar: '+e.message)}finally{hideLoading()}}
+async function borrarUsuariosDemo(){if(!confirm('¿Quitar usuarios demo/prueba del listado y de la base? No se borra admin.'))return;try{showLoading('Quitando usuarios demo...');const r=await api('/api/users/cleanup-demos',{method:'POST'});alert(`Usuarios demo quitados: ${r.deleted||0}`);editingUserId=null;await render()}catch(e){alert('No se pudo limpiar demos: '+e.message)}finally{hideLoading()}}
+async function limpiarInicio(){
+  const ok = confirm('Esto borrará TODOS los tickets y TODOS los usuarios excepto admin. ¿Seguro que quieres empezar en limpio?');
+  if(!ok) return;
+  const ok2 = confirm('Confirmación final: esta acción no se puede deshacer. ¿Borrar tickets y usuarios ahora?');
+  if(!ok2) return;
+  try{
+    showLoading('Limpiando sistema...');
+    const r = await api('/api/admin/limpiar-inicio',{method:'POST'});
+    alert(`Sistema limpio.\nTickets borrados: ${r.tickets_borrados||0}\nUsuarios borrados: ${r.usuarios_borrados||0}\nSolo queda admin.`);
+    editingUserId=null;
+    await render();
+  }catch(e){
+    alert('No se pudo limpiar el sistema: '+e.message);
+  }finally{
+    hideLoading();
+  }
+}
+
+async function resetPass(id){const p=prompt('Nueva contraseña temporal (mínimo 6 caracteres)','Temp1234');if(!p)return;await api('/api/users/'+id+'/reset-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:p})});alert('Contraseña reiniciada. El usuario deberá cambiarla al entrar.');render()}
+
+async function desactivarUsuario(id){
+  return eliminarUsuario(id);
+}
+
+async function eliminarUsuario(id){
+  if(!confirm('¿Eliminar este usuario definitivamente? Esta acción no se puede deshacer.')) return;
+  try{
+    showLoading('Eliminando usuario...');
+    await api(`/api/users/${id}`,{method:'DELETE'});
+    alert('Usuario eliminado correctamente');
+    await render();
+  }catch(e){
+    alert('No se pudo eliminar usuario: '+e.message);
+  }finally{
+    hideLoading();
+  }
+}
+
+async function eliminarUsuario(id){if(!confirm('¿Eliminar este usuario definitivamente? Esta acción no se puede deshacer.'))return;await api('/api/users/'+id,{method:'DELETE'});render()}
+function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Vista compacta: el sistema muestra horas/minutos para leer rápido, pero conserva los minutos exactos para control y Excel.</p><p><b>Tiempo muerto total:</b> <span class="time-compact">${fmtMin(reportes.muertoTotalMin||0)}</span> <span class="muted">(${fmtMinDetalle(reportes.muertoTotalMin||0)})</span></p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br><span class="time-compact">${fmtMin(reportes.mttoMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.mttoMin||0)}</div><div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br><span class="time-compact">${fmtMin(reportes.produccionMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.produccionMin||0)}</div><div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(ticketsVisibles())}`}
+function simpleStats(title,obj){const rows=topEntries(obj,8);return `<div class="card"><h2>${title}</h2><div class="stats-list">${rows.map(([k,v])=>`<div class="stat-row"><b>${esc(k)}</b><span>${v}</span></div>`).join('')||'<p class="muted">Sin datos</p>'}</div></div>`}
+
+window.changePass=changePass;
+window.crearTicket=crearTicket;
+window.asignar=asignar;
+window.iniciar=iniciar;
+window.aceptar=aceptar;
+window.terminar=terminar;
+window.liberar=liberar;
+window.devolver=devolver;
+window.puedeLiberarTicket=puedeLiberarTicket;
+window.render=render;
+window.salir=salir;
+window.doLogin=doLogin;
+window.assetSuggest=assetSuggest;
+window.selectAsset=selectAsset;
+window.reportanteSuggest=reportanteSuggest;
+window.selectReportante=selectReportante;
+window.importar=importar;
+window.agregarActivo=agregarActivo;
+window.crearUsuario=crearUsuario;
+window.limpiarFormularioUsuario=limpiarFormularioUsuario;
+window.ajustarFormularioUsuario=ajustarFormularioUsuario;
+window.guardarEdicionUsuario=guardarEdicionUsuario;
+window.cancelarEdicionUsuario=cancelarEdicionUsuario;
+window.borrarUsuariosDemo=borrarUsuariosDemo;
+window.limpiarInicio=limpiarInicio;
+window.editarUsuario=editarUsuario;
+window.resetPass=resetPass;
+window.desactivarUsuario=desactivarUsuario;
+window.eliminarUsuario=eliminarUsuario;
+window.abrirAvisoTecnico=abrirAvisoTecnico;
+window.abrirConfirmacionUsuario=abrirConfirmacionUsuario;
+window.cerrarModalAsignacion=cerrarModalAsignacion;
+window.abrirAvisoGerente=abrirAvisoGerente;
+window.cerrarModalGerente=cerrarModalGerente;
+
+window.addEventListener('error',e=>{console.error(e.error||e.message);});
+boot();
+</script>
 </body>
 </html>
