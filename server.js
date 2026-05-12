@@ -572,6 +572,52 @@ async function initDb(){
     END $$;
   `);
 
+
+
+  await pool.query(`
+    create table if not exists unidad_prestamos(
+      id bigserial primary key,
+      folio text unique not null,
+      tipo_salida text,
+      empresa text,
+      op text,
+      tecnico_id text,
+      tecnico_nombre text,
+      tecnico_numero text,
+      cantidad_tecnicos int default 1,
+      licencia_numero text,
+      lleva_remolque text default 'NO',
+      datos_remolque text,
+      unidad_asignada text,
+      estado text not null default 'SOLICITADO',
+      sucursal text,
+      area text,
+      created_by bigint references users(id),
+      creado timestamptz not null default now(),
+      actualizado timestamptz not null default now()
+    );
+    create table if not exists unidad_prestamo_checklists(
+      id bigserial primary key,
+      folio text not null references unidad_prestamos(folio) on delete cascade,
+      tipo text not null,
+      km text,
+      combustible int,
+      datos jsonb default '{}'::jsonb,
+      creado_por bigint references users(id),
+      creado timestamptz not null default now()
+    );
+    create table if not exists unidad_prestamo_percances(
+      id bigserial primary key,
+      folio text not null references unidad_prestamos(folio) on delete cascade,
+      hechos text,
+      danos text,
+      acciones text,
+      datos jsonb default '{}'::jsonb,
+      creado_por bigint references users(id),
+      creado timestamptz not null default now()
+    );
+  `);
+
   const c = await pool.query('select count(*)::int as n from users');
   if(c.rows[0].n === 0){
     const hash = await bcrypt.hash('1234', 12);
@@ -1542,6 +1588,73 @@ app.get('/api/export/excel', requireCanExport, async (req,res)=>{
   res.setHeader('Content-Disposition','attachment; filename="reporte-ibs.xlsx"');
   res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.send(buf);
+});
+
+
+
+// ================= MODULO AUTORIZADO: PRESTAMO DE UNIDADES =================
+function canManageUnitLoans(user){ return Boolean(user && ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase())); }
+app.get('/api/unidad-prestamos', requireLogin, async (req,res)=>{
+  const user=req.session.user;
+  const params=[]; const clauses=[];
+  if(!canManageUnitLoans(user)){
+    if(user.sucursal){ params.push(canonicalSucursal(user.sucursal)); clauses.push(`upper(coalesce(sucursal,'')) = $${params.length}`); }
+    if(user.area_asignada){ params.push(norm(user.area_asignada)); clauses.push(`upper(coalesce(area,'')) = $${params.length}`); }
+    params.push(user.id); clauses.push(`created_by=$${params.length}`);
+  }
+  const where=clauses.length?' where '+clauses.join(' and '):'';
+  const r=await pool.query(`select * from unidad_prestamos ${where} order by creado desc limit 500`, params);
+  res.json(r.rows);
+});
+app.post('/api/unidad-prestamos', requireLogin, async (req,res)=>{
+  const b=req.body||{}; const user=req.session.user;
+  if(!clean(b.empresa)) return res.status(400).json({error:'Empresa obligatoria.'});
+  if(!clean(b.tecnico_nombre)) return res.status(400).json({error:'Selecciona técnico/usuario desde empleados.'});
+  if(!clean(b.licencia_numero)) return res.status(400).json({error:'Número/folio de licencia obligatorio.'});
+  const folio='UNI-'+Date.now();
+  const r=await pool.query(`insert into unidad_prestamos(folio,tipo_salida,empresa,op,tecnico_id,tecnico_nombre,tecnico_numero,cantidad_tecnicos,licencia_numero,lleva_remolque,datos_remolque,sucursal,area,created_by)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`, [folio,clean(b.tipo_salida),clean(b.empresa),clean(b.op),clean(b.tecnico_id),clean(b.tecnico_nombre),clean(b.tecnico_numero),Number(b.cantidad_tecnicos||1),clean(b.licencia_numero),clean(b.lleva_remolque)||'NO',clean(b.datos_remolque),canonicalSucursal(user.sucursal||''),canonicalArea(user.area_asignada||''),user.id]);
+  await logAction(user.id,'crear_prestamo_unidad',{folio});
+  res.json(r.rows[0]);
+});
+app.post('/api/unidad-prestamos/:folio/asignar', requireLogin, async (req,res)=>{
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Mantenimiento/Admin puede asignar unidad.'});
+  const unidad=clean(req.body.unidad_asignada);
+  if(!unidad) return res.status(400).json({error:'Unidad obligatoria.'});
+  const r=await pool.query(`update unidad_prestamos set unidad_asignada=$1, estado='ASIGNADO', actualizado=now() where folio=$2 returning *`, [unidad,req.params.folio]);
+  if(!r.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
+  await logAction(req.session.user.id,'asignar_unidad',{folio:req.params.folio,unidad});
+  res.json(r.rows[0]);
+});
+function validarChecklistUnidad(b){
+  if(!clean(b.km)) return 'KM obligatorio.';
+  if(b.combustible===undefined || b.combustible===null || b.combustible==='') return 'Combustible obligatorio.';
+  const items=b.items||{};
+  for(const [k,it] of Object.entries(items)){
+    if(it && it.aplica==='SI' && !it.ok) return 'Falta revisar: '+k;
+  }
+  if(items.poliza && items.poliza.aplica==='SI' && (!clean(b.poliza_numero) || !clean(b.poliza_vigencia))) return 'Póliza: número y vigencia obligatorios.';
+  if(!clean(b.firma_tecnico) || !clean(b.firma_mtto)) return 'Firmas obligatorias.';
+  return '';
+}
+app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, async (req,res)=>{
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Mantenimiento/Admin puede guardar checklist.'});
+  const b=req.body||{}; const err=validarChecklistUnidad(b); if(err) return res.status(400).json({error:err});
+  const tipo=clean(b.tipo)||'ENTREGA';
+  const r=await pool.query(`insert into unidad_prestamo_checklists(folio,tipo,km,combustible,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [req.params.folio,tipo,clean(b.km),Number(b.combustible||0),JSON.stringify(b),req.session.user.id]);
+  const estado=tipo==='RECEPCION'?'RECIBIDA':'ENTREGADA';
+  await pool.query(`update unidad_prestamos set estado=$1, actualizado=now() where folio=$2`, [estado,req.params.folio]);
+  await logAction(req.session.user.id,'checklist_unidad',{folio:req.params.folio,tipo});
+  res.json(r.rows[0]);
+});
+app.post('/api/unidad-prestamos/:folio/percance', requireLogin, async (req,res)=>{
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Mantenimiento/Admin puede registrar percance.'});
+  const b=req.body||{};
+  if(!clean(b.hechos)) return res.status(400).json({error:'Descripción de hechos obligatoria.'});
+  if(!clean(b.firma_tecnico) || !clean(b.firma_mtto)) return res.status(400).json({error:'Firmas obligatorias.'});
+  const r=await pool.query(`insert into unidad_prestamo_percances(folio,hechos,danos,acciones,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [req.params.folio,clean(b.hechos),clean(b.danos),clean(b.acciones),JSON.stringify(b),req.session.user.id]);
+  await logAction(req.session.user.id,'percance_unidad',{folio:req.params.folio});
+  res.json(r.rows[0]);
 });
 
 app.get('/', (req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
