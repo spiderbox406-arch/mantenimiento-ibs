@@ -630,6 +630,12 @@ async function initDb(){
     ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_username text;
     ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_nombre text;
     ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_en timestamptz;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS recepcion_por_id bigint references users(id);
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS recepcion_por_username text;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS recepcion_por_nombre text;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS recepcion_en timestamptz;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS entregado_en timestamptz;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS cerrado_en timestamptz;
   `);
 
   const c = await pool.query('select count(*)::int as n from users');
@@ -1631,16 +1637,28 @@ app.get('/api/tickets/:id/reporte', requireLogin, async (req,res)=>{
 
 // ================= MODULO AUTORIZADO: PRESTAMO DE UNIDADES =================
 function canManageUnitLoans(user){ return Boolean(user && ['admin','gerente','mantenimiento','tecnico'].includes(String(user.role||'').toLowerCase())); }
-function canWorkUnitLoan(user, loan){
+function sameUsername(a,b){ return String(a||'').toLowerCase() === String(b||'').toLowerCase(); }
+function canWorkUnitDelivery(user, loan){
   if(!user || !loan) return false;
   const role=String(user.role||'').toLowerCase();
   if(['admin','gerente','mantenimiento'].includes(role)) return true;
   if(role==='tecnico'){
     if(!loan.tomada_por_username) return true;
-    return String(loan.tomada_por_username||'').toLowerCase()===String(user.username||'').toLowerCase();
+    return sameUsername(loan.tomada_por_username, user.username);
   }
   return false;
 }
+function canWorkUnitReception(user, loan){
+  if(!user || !loan) return false;
+  const role=String(user.role||'').toLowerCase();
+  if(['admin','gerente','mantenimiento'].includes(role)) return true;
+  if(role==='tecnico'){
+    if(!loan.recepcion_por_username) return true;
+    return sameUsername(loan.recepcion_por_username, user.username);
+  }
+  return false;
+}
+function canWorkUnitLoan(user, loan){ return canWorkUnitDelivery(user, loan) || canWorkUnitReception(user, loan); }
 function uploadedPaths(files, field){
   const arr = files && files[field] ? files[field] : [];
   return arr.map(f => '/uploads/' + path.basename(f.filename));
@@ -1677,24 +1695,41 @@ app.post('/api/unidad-prestamos', requireLogin, uploadImages.fields([{name:'foto
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/tomar', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico, Mantenimiento, Gerente o Admin puede tomar la solicitud.'});
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico, Mantenimiento, Gerente o Admin puede tomar la entrega.'});
   const user=req.session.user;
   const r=await pool.query(`update unidad_prestamos
-    set tomada_por_id=$1, tomada_por_username=$2, tomada_por_nombre=$3, tomada_en=now(), estado=case when estado='SOLICITADO' then 'TOMADA' else estado end, actualizado=now()
-    where folio=$4 and (tomada_por_username is null or tomada_por_username='' or lower(tomada_por_username)=lower($2)) returning *`,
+    set tomada_por_id=$1, tomada_por_username=$2, tomada_por_nombre=$3, tomada_en=now(), estado='EN ENTREGA', actualizado=now()
+    where folio=$4
+      and estado in ('SOLICITADO','TOMADA','ASIGNADO','EN ENTREGA')
+      and (tomada_por_username is null or tomada_por_username='' or lower(tomada_por_username)=lower($2))
+    returning *`,
     [user.id, clean(user.username), clean(user.name||user.username), req.params.folio]);
-  if(!r.rows[0]) return res.status(409).json({error:'Esta solicitud ya fue tomada por otro técnico. Actualiza la pantalla.'});
-  await logAction(user.id,'tomar_prestamo_unidad',{folio:req.params.folio});
+  if(!r.rows[0]) return res.status(409).json({error:'Esta entrega ya fue tomada por otro técnico o ya está prestada. Actualiza la pantalla.'});
+  await logAction(user.id,'tomar_entrega_unidad',{folio:req.params.folio});
+  res.json(r.rows[0]);
+});
+app.post('/api/unidad-prestamos/:folio/tomar-recepcion', requireLogin, async (req,res)=>{
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico, Mantenimiento, Gerente o Admin puede tomar la recepción.'});
+  const user=req.session.user;
+  const r=await pool.query(`update unidad_prestamos
+    set recepcion_por_id=$1, recepcion_por_username=$2, recepcion_por_nombre=$3, recepcion_en=now(), estado='EN RECEPCION', actualizado=now()
+    where folio=$4
+      and estado in ('UNIDAD PRESTADA','ENTREGADA','EN_SERVICIO','EN RECEPCION')
+      and (recepcion_por_username is null or recepcion_por_username='' or lower(recepcion_por_username)=lower($2))
+    returning *`,
+    [user.id, clean(user.username), clean(user.name||user.username), req.params.folio]);
+  if(!r.rows[0]) return res.status(409).json({error:'Esta recepción ya fue tomada por otro técnico o todavía no está como unidad prestada.'});
+  await logAction(user.id,'tomar_recepcion_unidad',{folio:req.params.folio});
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/asignar', requireLogin, async (req,res)=>{
   if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico/Mantenimiento/Gerente/Admin puede asignar unidad.'});
   const actual=await pool.query('select * from unidad_prestamos where folio=$1',[req.params.folio]);
   if(!actual.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
-  if(!canWorkUnitLoan(req.session.user, actual.rows[0])) return res.status(403).json({error:'Esta solicitud la tomó otro técnico.'});
+  if(!canWorkUnitDelivery(req.session.user, actual.rows[0])) return res.status(403).json({error:'Esta entrega la tomó otro técnico.'});
   const unidad=clean(req.body.unidad_asignada);
   if(!unidad) return res.status(400).json({error:'Unidad obligatoria.'});
-  const r=await pool.query(`update unidad_prestamos set unidad_asignada=$1, estado='ASIGNADO', tomada_por_id=coalesce(tomada_por_id,$2), tomada_por_username=coalesce(tomada_por_username,$3), tomada_por_nombre=coalesce(tomada_por_nombre,$4), tomada_en=coalesce(tomada_en,now()), actualizado=now() where folio=$5 returning *`, [unidad,req.session.user.id,clean(req.session.user.username),clean(req.session.user.name||req.session.user.username),req.params.folio]);
+  const r=await pool.query(`update unidad_prestamos set unidad_asignada=$1, estado='EN ENTREGA', tomada_por_id=coalesce(tomada_por_id,$2), tomada_por_username=coalesce(tomada_por_username,$3), tomada_por_nombre=coalesce(tomada_por_nombre,$4), tomada_en=coalesce(tomada_en,now()), actualizado=now() where folio=$5 returning *`, [unidad,req.session.user.id,clean(req.session.user.username),clean(req.session.user.name||req.session.user.username),req.params.folio]);
   await logAction(req.session.user.id,'asignar_unidad',{folio:req.params.folio,unidad});
   res.json(r.rows[0]);
 });
@@ -1715,17 +1750,23 @@ app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fi
   const folio=req.params.folio;
   const loan=await pool.query('select * from unidad_prestamos where folio=$1', [folio]);
   if(!loan.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
-  if(!canWorkUnitLoan(req.session.user, loan.rows[0])) return res.status(403).json({error:'Esta solicitud la tomó otro técnico.'});
   const b=req.body||{};
-  if((clean(b.tipo)||'ENTREGA') === 'ENTREGA' && !clean(loan.rows[0].unidad_asignada)) return res.status(400).json({error:'Primero Mantenimiento debe asignar la unidad.'});
-  const err=validarChecklistUnidad(b); if(err) return res.status(400).json({error:err});
   const tipo=clean(b.tipo)||'ENTREGA';
+  if(tipo === 'ENTREGA' && !canWorkUnitDelivery(req.session.user, loan.rows[0])) return res.status(403).json({error:'Esta entrega la tomó otro técnico.'});
+  if(tipo === 'RECEPCION' && !canWorkUnitReception(req.session.user, loan.rows[0])) return res.status(403).json({error:'Esta recepción la tomó otro técnico.'});
+  if(tipo === 'ENTREGA' && !clean(loan.rows[0].unidad_asignada)) return res.status(400).json({error:'Primero Mantenimiento debe asignar la unidad.'});
+  if(tipo === 'RECEPCION' && !['UNIDAD PRESTADA','ENTREGADA','EN_SERVICIO','EN RECEPCION'].includes(String(loan.rows[0].estado||''))) return res.status(400).json({error:'La unidad todavía no está prestada para poder recibirla.'});
+  const err=validarChecklistUnidad(b); if(err) return res.status(400).json({error:err});
   let items={}; try{ items=typeof b.items==='string'?JSON.parse(b.items):(b.items||{}); }catch(e){ items={}; }
   const fotos = uploadedPaths(req.files, 'fotos');
   const datos = {...b, items, fotos};
   const r=await pool.query(`insert into unidad_prestamo_checklists(folio,tipo,km,combustible,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [folio,tipo,clean(b.km),Number(b.combustible||0),JSON.stringify(datos),req.session.user.id]);
-  const estado=tipo==='RECEPCION'?'RECIBIDA':'ENTREGADA';
-  await pool.query(`update unidad_prestamos set estado=$1, actualizado=now() where folio=$2`, [estado,folio]);
+  const estado=tipo==='RECEPCION'?'CERRADA':'UNIDAD PRESTADA';
+  if(tipo==='RECEPCION') {
+    await pool.query(`update unidad_prestamos set estado=$1, cerrado_en=now(), actualizado=now() where folio=$2`, [estado,folio]);
+  } else {
+    await pool.query(`update unidad_prestamos set estado=$1, entregado_en=now(), actualizado=now() where folio=$2`, [estado,folio]);
+  }
   await logAction(req.session.user.id,'checklist_unidad',{folio,tipo,fotos:fotos.length});
   res.json(r.rows[0]);
 });
