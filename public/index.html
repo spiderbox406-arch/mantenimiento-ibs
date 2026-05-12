@@ -264,10 +264,11 @@ function fmt(d){return d?new Date(d).toLocaleString():'-'}
 function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replaceAll(' ','')}
 function isAdmin(){return me && me.role==='admin'}
 function canExport(){return me && (me.role==='admin' || me.can_export===true)}
-function puedeExportarPdf(){return me && ['admin','gerente','mantenimiento','tecnico'].includes(String(me.role||'').toLowerCase())}
+function esPersonalMantenimiento(){return me && (['admin','gerente','mantenimiento','tecnico'].includes(String(me.role||'').toLowerCase()) || normalizeKey(me.area_asignada||'')==='mantenimiento')}
+function puedeExportarPdf(){return esPersonalMantenimiento()}
 function isGerencia(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
 function esTecnico(){return me && String(me.role||'').toLowerCase()==='tecnico'}
-function puedeGestionarMtto(){return me && ['admin','gerente','mantenimiento','tecnico'].includes(String(me.role||'').toLowerCase())}
+function puedeGestionarMtto(){return esPersonalMantenimiento()}
 function puedeAceptarTicket(t){return puedeGestionarMtto() && (!t.tecnico_username || String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase() || isGerencia())}
 function sameKey(a,b){return normalize(a)===normalize(b)}
 function esMatriz(s){return sameKey(s,'CHIHUAHUA')}
@@ -301,7 +302,7 @@ function canonicalSucursalFront(s){const k=normalizeKey(s);return SUCURSAL_ALIAS
 function sameLoose(a,b){return normalizeKey(canonicalSucursalFront(a))===normalizeKey(canonicalSucursalFront(b))}
 function rolActual(){return String(me?.role||'').toLowerCase()}
 function esUsuarioArea(){return ['operaciones','usuario_area','usuario'].includes(rolActual())}
-function puedeVerTodoFrontend(){return ['admin','gerente','mantenimiento'].includes(rolActual())}
+function puedeVerTodoFrontend(){return ['admin','gerente','mantenimiento'].includes(rolActual()) || normalizeKey(me?.area_asignada||'')==='mantenimiento'}
 function perteneceASucursalArea(row){
   if(!me) return false;
   if(puedeVerTodoFrontend()) return true;
@@ -315,8 +316,7 @@ function perteneceASucursalArea(row){
 function activosVisibles(){return (activos||[]).filter(perteneceASucursalArea)}
 function ticketsVisibles(){return (tickets||[]).filter(t=>{
   if(!me) return false;
-  if(puedeVerTodoFrontend()) return true;
-  if(rolActual()==='tecnico') return String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase();
+  if(esPersonalMantenimiento()) return !me.sucursal || !t.sucursal || sameLoose(t.sucursal||'', me.sucursal||'');
   return sameLoose(t.sucursal||'', me.sucursal||'') && sameLoose(t.area||'', me.area_asignada||'');
 })}
 function fmtMin(min){
