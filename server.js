@@ -31,7 +31,7 @@ const imageStorage = multer.diskStorage({
 });
 const uploadImages = multer({
   storage: imageStorage,
-  limits: { fileSize: 8 * 1024 * 1024, files: 6 },
+  limits: { fileSize: 8 * 1024 * 1024, files: 20 },
   fileFilter: (req, file, cb) => {
     if(!file.mimetype.startsWith('image/')) return cb(new Error('Solo se permiten imágenes.'));
     cb(null, true);
@@ -142,7 +142,7 @@ function sameKey(a,b){ return canonicalSucursal(a) === canonicalSucursal(b); }
 function isGlobalRole(role){ return ['admin','gerente','mantenimiento'].includes(String(role||'').toLowerCase()); }
 function isGlobalUser(user){ return Boolean(user && isGlobalRole(user.role)); }
 function isTecnicoRole(role){ return ['tecnico','mantenimiento','admin','gerente'].includes(String(role||'').toLowerCase()); }
-function canManageTickets(user){ return Boolean(user && ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase())); }
+function canManageTickets(user){ return Boolean(user && ['admin','gerente','mantenimiento','tecnico'].includes(String(user.role||'').toLowerCase())); }
 function canWorkTicket(user, ticket){
   if(!user || !ticket) return false;
   const role = String(user.role||'').toLowerCase();
@@ -196,11 +196,18 @@ function addTicketVisibilityClauses(user, params, clauses, alias=''){
   const p = alias ? alias + '.' : '';
   const role = String(user?.role || '').toLowerCase();
 
-  // El técnico debe ver SOLO los tickets asignados a su usuario,
-  // sin depender de que coincidan sucursal o área.
+  // Técnico de mantenimiento: ve los tickets que ya tomó y también los reportados disponibles de su sucursal.
+  // Así puede agarrar una reparación sin esperar asignación del gerente.
   if(role === 'tecnico'){
     params.push(String(user.username || '').toLowerCase());
-    clauses.push(`lower(coalesce(${p}tecnico_username,'')) = $${params.length}`);
+    const userParam = `$${params.length}`;
+    if(clean(user.sucursal)){
+      const variants = sucursalVariants(user.sucursal);
+      params.push(variants);
+      clauses.push(`(lower(coalesce(${p}tecnico_username,'')) = ${userParam} OR (${p}estado = 'Reportado' AND ${sqlNormKey(`${p}sucursal`)} = any($${params.length}::text[])))`);
+    }else{
+      clauses.push(`(lower(coalesce(${p}tecnico_username,'')) = ${userParam} OR ${p}estado = 'Reportado')`);
+    }
     return;
   }
 
@@ -616,6 +623,13 @@ async function initDb(){
       creado_por bigint references users(id),
       creado timestamptz not null default now()
     );
+  `);
+
+  await pool.query(`
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_id bigint references users(id);
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_username text;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_nombre text;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_en timestamptz;
   `);
 
   const c = await pool.query('select count(*)::int as n from users');
@@ -1261,14 +1275,23 @@ app.post('/api/tickets/:id/iniciar', requireLogin, async (req,res)=>{
   try{
     const q = await pool.query('select * from tickets where id=$1',[req.params.id]);
     const t = q.rows[0];
+    const user=req.session.user;
+    const role=String(user.role||'').toLowerCase();
     if(!t) return res.status(404).json({error:'Ticket no encontrado.'});
-    if(!canWorkTicket(req.session.user, t)) return res.status(403).json({error:'Solo el técnico asignado, gerente, mantenimiento o admin puede aceptar este trabajo.'});
+
+    const yaAsignadoAOtro = clean(t.tecnico_username) && String(t.tecnico_username).toLowerCase() !== String(user.username||'').toLowerCase();
+    const puedeTomarLibre = ['tecnico','mantenimiento','admin','gerente'].includes(role) && t.estado === 'Reportado';
+    const puedeAceptarAsignado = !yaAsignadoAOtro || ['admin','gerente','mantenimiento'].includes(role);
+    if(!puedeTomarLibre && !(t.estado === 'Asignado' && puedeAceptarAsignado)){
+      return res.status(403).json({error:'Este ticket ya fue tomado o no tienes permiso para tomarlo.'});
+    }
 
     const r = await pool.query(
-      "update tickets set estado='En atención', iniciado=coalesce(iniciado,now()), mtto_inicio_actual=coalesce(mtto_inicio_actual, creado, now()) where id=$1 returning *",
-      [req.params.id]
+      "update tickets set estado='En atención', tecnico_username=coalesce(nullif(tecnico_username,''),$1), asignado=coalesce(asignado,now()), iniciado=coalesce(iniciado,now()), mtto_inicio_actual=coalesce(mtto_inicio_actual, creado, now()) where id=$2 and estado in ('Reportado','Asignado') returning *",
+      [clean(user.username), req.params.id]
     );
-    await logAction(req.session.user.id,'start_ticket',{id:req.params.id});
+    if(!r.rows[0]) return res.status(409).json({error:'Otro técnico ya tomó este ticket. Actualiza la pantalla.'});
+    await logAction(user.id,'take_ticket',{id:req.params.id, tecnico:user.username});
     res.json({ok:true, ticket:decorateTicket(r.rows[0])});
   }catch(err){
     console.error('Error iniciando ticket:', err);
@@ -1592,8 +1615,42 @@ app.get('/api/export/excel', requireCanExport, async (req,res)=>{
 
 
 
+
+
+app.get('/api/tickets/:id/reporte', requireLogin, async (req,res)=>{
+  const id=req.params.id;
+  const q=await pool.query('select * from tickets where id=$1',[id]);
+  const t=q.rows[0];
+  if(!t) return res.status(404).send('Ticket no encontrado');
+  if(!canWorkTicket(req.session.user,t) && !canManageTickets(req.session.user) && String(t.created_by)!==String(req.session.user.id)) return res.status(403).send('Sin permiso');
+  const fotos=(arr)=>{ let f=[]; try{ f=Array.isArray(arr)?arr:JSON.parse(arr||'[]'); }catch(e){ f=[]; } return f.map(src=>`<img src="${escHtml(src)}">`).join(''); };
+  const tiempos=calcTicketTimes(t);
+  res.setHeader('Content-Type','text/html; charset=utf-8');
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Ticket ${escHtml(id)}</title><style>body{font-family:Arial;margin:28px;color:#222}h1{border-bottom:4px solid #ff6a00;padding-bottom:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.box{border:1px solid #ccc;border-radius:10px;padding:10px;margin:10px 0}.photos img{max-width:180px;max-height:140px;margin:6px;border:1px solid #ccc;border-radius:8px}.btn{background:#ff6a00;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><button class="btn no-print" onclick="window.print()">Imprimir / Guardar como PDF</button><h1>Reporte de ticket ${escHtml(id)}</h1><div class="grid"><p><b>Estado:</b> ${escHtml(t.estado)}</p><p><b>Prioridad:</b> ${escHtml(t.prioridad)}</p><p><b>Activo:</b> ${escHtml(t.activo)} - ${escHtml(t.activo_descripcion)}</p><p><b>Área/Sucursal:</b> ${escHtml(t.area)} · ${escHtml(t.sucursal)}</p><p><b>Ubicación:</b> ${escHtml(t.ubicacion)}</p><p><b>Solicita:</b> ${escHtml(t.solicitante)} ${escHtml(t.telefono_solicitante)}</p><p><b>Técnico:</b> ${escHtml(t.tecnico_username)}</p><p><b>Tipo falla:</b> ${escHtml(t.tipo_falla)}</p></div><div class="box"><b>Falla reportada:</b><br>${escHtml(t.falla)}</div><div class="box"><b>Diagnóstico:</b><br>${escHtml(t.diagnostico)}</div><div class="box"><b>Solución:</b><br>${escHtml(t.solucion)}</div><div class="grid"><p><b>Creado:</b> ${escHtml(t.creado)}</p><p><b>Inicio:</b> ${escHtml(t.iniciado)}</p><p><b>Técnico libera:</b> ${escHtml(t.terminado)}</p><p><b>Operación libera:</b> ${escHtml(t.liberado)}</p><p><b>Tiempo MTTO:</b> ${tiempos.mttoMin} min</p><p><b>Tiempo operaciones:</b> ${tiempos.produccionMin} min</p><p><b>Total muerto:</b> ${tiempos.muertoTotalMin} min</p></div><h2>Fotos reporte</h2><div class="photos">${fotos(t.fotos_reporte)}</div><h2>Fotos trabajo</h2><div class="photos">${fotos(t.fotos_trabajo)}</div></body></html>`);
+});
+
 // ================= MODULO AUTORIZADO: PRESTAMO DE UNIDADES =================
-function canManageUnitLoans(user){ return Boolean(user && ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase())); }
+function canManageUnitLoans(user){ return Boolean(user && ['admin','gerente','mantenimiento','tecnico'].includes(String(user.role||'').toLowerCase())); }
+function canWorkUnitLoan(user, loan){
+  if(!user || !loan) return false;
+  const role=String(user.role||'').toLowerCase();
+  if(['admin','gerente','mantenimiento'].includes(role)) return true;
+  if(role==='tecnico'){
+    if(!loan.tomada_por_username) return true;
+    return String(loan.tomada_por_username||'').toLowerCase()===String(user.username||'').toLowerCase();
+  }
+  return false;
+}
+function uploadedPaths(files, field){
+  const arr = files && files[field] ? files[field] : [];
+  return arr.map(f => '/uploads/' + path.basename(f.filename));
+}
+function firmaImg(v){
+  const s = clean(v);
+  if(s.startsWith('data:image/')) return `<img src="${s}" style="max-width:240px;max-height:95px;border:1px solid #ddd;border-radius:8px">`;
+  return escHtml(s || '-');
+}
+function escHtml(v){ return String(v ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[c])); }
 app.get('/api/unidad-prestamos', requireLogin, async (req,res)=>{
   const user=req.session.user;
   const params=[]; const clauses=[];
@@ -1606,55 +1663,101 @@ app.get('/api/unidad-prestamos', requireLogin, async (req,res)=>{
   const r=await pool.query(`select * from unidad_prestamos ${where} order by creado desc limit 500`, params);
   res.json(r.rows);
 });
-app.post('/api/unidad-prestamos', requireLogin, async (req,res)=>{
+app.post('/api/unidad-prestamos', requireLogin, uploadImages.fields([{name:'foto_licencia',maxCount:1}]), async (req,res)=>{
   const b=req.body||{}; const user=req.session.user;
+  const licenciaFotos = uploadedPaths(req.files, 'foto_licencia');
   if(!clean(b.empresa)) return res.status(400).json({error:'Empresa obligatoria.'});
   if(!clean(b.tecnico_nombre)) return res.status(400).json({error:'Selecciona técnico/usuario desde empleados.'});
-  if(!clean(b.licencia_numero)) return res.status(400).json({error:'Número/folio de licencia obligatorio.'});
+  if(!clean(b.licencia_numero) && !licenciaFotos.length) return res.status(400).json({error:'Captura número de licencia o anexa foto de licencia.'});
   const folio='UNI-'+Date.now();
+  const datos = {foto_licencia: licenciaFotos[0] || '', nota:'La unidad se asigna únicamente por Mantenimiento.'};
   const r=await pool.query(`insert into unidad_prestamos(folio,tipo_salida,empresa,op,tecnico_id,tecnico_nombre,tecnico_numero,cantidad_tecnicos,licencia_numero,lleva_remolque,datos_remolque,sucursal,area,created_by)
-    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`, [folio,clean(b.tipo_salida),clean(b.empresa),clean(b.op),clean(b.tecnico_id),clean(b.tecnico_nombre),clean(b.tecnico_numero),Number(b.cantidad_tecnicos||1),clean(b.licencia_numero),clean(b.lleva_remolque)||'NO',clean(b.datos_remolque),canonicalSucursal(user.sucursal||''),canonicalArea(user.area_asignada||''),user.id]);
-  await logAction(user.id,'crear_prestamo_unidad',{folio});
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`, [folio,clean(b.tipo_salida),clean(b.empresa),clean(b.op),clean(b.tecnico_id),clean(b.tecnico_nombre),clean(b.tecnico_numero),Number(b.cantidad_tecnicos||1),clean(b.licencia_numero),clean(b.lleva_remolque)||'NO',clean(b.datos_remolque) + (datos.foto_licencia ? `\nFoto licencia: ${datos.foto_licencia}` : ''),canonicalSucursal(user.sucursal||''),canonicalArea(user.area_asignada||''),user.id]);
+  await logAction(user.id,'crear_prestamo_unidad',{folio, foto_licencia:datos.foto_licencia});
+  res.json(r.rows[0]);
+});
+app.post('/api/unidad-prestamos/:folio/tomar', requireLogin, async (req,res)=>{
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico, Mantenimiento, Gerente o Admin puede tomar la solicitud.'});
+  const user=req.session.user;
+  const r=await pool.query(`update unidad_prestamos
+    set tomada_por_id=$1, tomada_por_username=$2, tomada_por_nombre=$3, tomada_en=now(), estado=case when estado='SOLICITADO' then 'TOMADA' else estado end, actualizado=now()
+    where folio=$4 and (tomada_por_username is null or tomada_por_username='' or lower(tomada_por_username)=lower($2)) returning *`,
+    [user.id, clean(user.username), clean(user.name||user.username), req.params.folio]);
+  if(!r.rows[0]) return res.status(409).json({error:'Esta solicitud ya fue tomada por otro técnico. Actualiza la pantalla.'});
+  await logAction(user.id,'tomar_prestamo_unidad',{folio:req.params.folio});
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/asignar', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Mantenimiento/Admin puede asignar unidad.'});
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico/Mantenimiento/Gerente/Admin puede asignar unidad.'});
+  const actual=await pool.query('select * from unidad_prestamos where folio=$1',[req.params.folio]);
+  if(!actual.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
+  if(!canWorkUnitLoan(req.session.user, actual.rows[0])) return res.status(403).json({error:'Esta solicitud la tomó otro técnico.'});
   const unidad=clean(req.body.unidad_asignada);
   if(!unidad) return res.status(400).json({error:'Unidad obligatoria.'});
-  const r=await pool.query(`update unidad_prestamos set unidad_asignada=$1, estado='ASIGNADO', actualizado=now() where folio=$2 returning *`, [unidad,req.params.folio]);
-  if(!r.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
+  const r=await pool.query(`update unidad_prestamos set unidad_asignada=$1, estado='ASIGNADO', tomada_por_id=coalesce(tomada_por_id,$2), tomada_por_username=coalesce(tomada_por_username,$3), tomada_por_nombre=coalesce(tomada_por_nombre,$4), tomada_en=coalesce(tomada_en,now()), actualizado=now() where folio=$5 returning *`, [unidad,req.session.user.id,clean(req.session.user.username),clean(req.session.user.name||req.session.user.username),req.params.folio]);
   await logAction(req.session.user.id,'asignar_unidad',{folio:req.params.folio,unidad});
   res.json(r.rows[0]);
 });
 function validarChecklistUnidad(b){
   if(!clean(b.km)) return 'KM obligatorio.';
   if(b.combustible===undefined || b.combustible===null || b.combustible==='') return 'Combustible obligatorio.';
-  const items=b.items||{};
+  let items={};
+  try{ items = typeof b.items === 'string' ? JSON.parse(b.items) : (b.items||{}); }catch(e){ items={}; }
   for(const [k,it] of Object.entries(items)){
-    if(it && it.aplica==='SI' && !it.ok) return 'Falta revisar: '+k;
+    if(it && it.aplica==='SI' && !(it.ok === true || it.ok === 'true' || it.ok === 'on')) return 'Falta revisar: '+k;
   }
   if(items.poliza && items.poliza.aplica==='SI' && (!clean(b.poliza_numero) || !clean(b.poliza_vigencia))) return 'Póliza: número y vigencia obligatorios.';
   if(!clean(b.firma_tecnico) || !clean(b.firma_mtto)) return 'Firmas obligatorias.';
   return '';
 }
-app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Mantenimiento/Admin puede guardar checklist.'});
-  const b=req.body||{}; const err=validarChecklistUnidad(b); if(err) return res.status(400).json({error:err});
+app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fields([{name:'fotos',maxCount:20}]), async (req,res)=>{
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico/Mantenimiento/Gerente/Admin puede guardar checklist.'});
+  const folio=req.params.folio;
+  const loan=await pool.query('select * from unidad_prestamos where folio=$1', [folio]);
+  if(!loan.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
+  if(!canWorkUnitLoan(req.session.user, loan.rows[0])) return res.status(403).json({error:'Esta solicitud la tomó otro técnico.'});
+  const b=req.body||{};
+  if((clean(b.tipo)||'ENTREGA') === 'ENTREGA' && !clean(loan.rows[0].unidad_asignada)) return res.status(400).json({error:'Primero Mantenimiento debe asignar la unidad.'});
+  const err=validarChecklistUnidad(b); if(err) return res.status(400).json({error:err});
   const tipo=clean(b.tipo)||'ENTREGA';
-  const r=await pool.query(`insert into unidad_prestamo_checklists(folio,tipo,km,combustible,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [req.params.folio,tipo,clean(b.km),Number(b.combustible||0),JSON.stringify(b),req.session.user.id]);
+  let items={}; try{ items=typeof b.items==='string'?JSON.parse(b.items):(b.items||{}); }catch(e){ items={}; }
+  const fotos = uploadedPaths(req.files, 'fotos');
+  const datos = {...b, items, fotos};
+  const r=await pool.query(`insert into unidad_prestamo_checklists(folio,tipo,km,combustible,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [folio,tipo,clean(b.km),Number(b.combustible||0),JSON.stringify(datos),req.session.user.id]);
   const estado=tipo==='RECEPCION'?'RECIBIDA':'ENTREGADA';
-  await pool.query(`update unidad_prestamos set estado=$1, actualizado=now() where folio=$2`, [estado,req.params.folio]);
-  await logAction(req.session.user.id,'checklist_unidad',{folio:req.params.folio,tipo});
+  await pool.query(`update unidad_prestamos set estado=$1, actualizado=now() where folio=$2`, [estado,folio]);
+  await logAction(req.session.user.id,'checklist_unidad',{folio,tipo,fotos:fotos.length});
   res.json(r.rows[0]);
 });
-app.post('/api/unidad-prestamos/:folio/percance', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Mantenimiento/Admin puede registrar percance.'});
+app.post('/api/unidad-prestamos/:folio/percance', requireLogin, uploadImages.fields([{name:'fotos',maxCount:20}]), async (req,res)=>{
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico/Mantenimiento/Gerente/Admin puede registrar percance.'});
   const b=req.body||{};
   if(!clean(b.hechos)) return res.status(400).json({error:'Descripción de hechos obligatoria.'});
   if(!clean(b.firma_tecnico) || !clean(b.firma_mtto)) return res.status(400).json({error:'Firmas obligatorias.'});
-  const r=await pool.query(`insert into unidad_prestamo_percances(folio,hechos,danos,acciones,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [req.params.folio,clean(b.hechos),clean(b.danos),clean(b.acciones),JSON.stringify(b),req.session.user.id]);
-  await logAction(req.session.user.id,'percance_unidad',{folio:req.params.folio});
+  const fotos = uploadedPaths(req.files, 'fotos');
+  const datos = {...b, fotos};
+  const r=await pool.query(`insert into unidad_prestamo_percances(folio,hechos,danos,acciones,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [req.params.folio,clean(b.hechos),clean(b.danos),clean(b.acciones),JSON.stringify(datos),req.session.user.id]);
+  await logAction(req.session.user.id,'percance_unidad',{folio:req.params.folio,fotos:fotos.length});
   res.json(r.rows[0]);
+});
+function fuelPdfLabel(pct){ pct=Number(pct||0); if(pct===0)return 'E / 0%'; if(pct===25)return '1/4 / 25%'; if(pct===50)return '1/2 / 50%'; if(pct===75)return '3/4 / 75%'; if(pct===100)return 'F / 100%'; return pct+'%'; }
+function fuelGaugePdf(pct){ pct=Math.max(0,Math.min(100,Number(pct||0))); const deg=(180 - pct*180/100) * Math.PI/180; const cx=160, cy=150, r=105; const x=cx+r*Math.cos(deg); const y=cy-r*Math.sin(deg); return `<div class="pdf-fuel"><svg viewBox="0 0 320 190" width="320" height="190"><path d="M55 150 A105 105 0 0 1 265 150" fill="none" stroke="#111" stroke-width="14"/><text x="42" y="162" font-size="20" font-weight="700">E</text><text x="72" y="82" font-size="18" font-weight="700">1/4</text><text x="142" y="45" font-size="18" font-weight="700">1/2</text><text x="218" y="82" font-size="18" font-weight="700">3/4</text><text x="270" y="162" font-size="20" font-weight="700">F</text><line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#e51b24" stroke-width="7" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="18" fill="#555" stroke="#222" stroke-width="5"/></svg><h3>Nivel de combustible: ${fuelPdfLabel(pct)}</h3></div>`; }
+app.get('/api/unidad-prestamos/:folio/reporte', requireLogin, async (req,res)=>{
+  const folio=req.params.folio;
+  const p=await pool.query('select * from unidad_prestamos where folio=$1', [folio]);
+  if(!p.rows[0]) return res.status(404).send('No encontrado');
+  const loan=p.rows[0];
+  if(!canManageUnitLoans(req.session.user) && String(loan.created_by)!==String(req.session.user.id)) return res.status(403).send('Sin permiso');
+  const ch=await pool.query('select * from unidad_prestamo_checklists where folio=$1 order by creado', [folio]);
+  const pe=await pool.query('select * from unidad_prestamo_percances where folio=$1 order by creado', [folio]);
+  const renderFotos=(datos)=> (datos.fotos||[]).map(src=>`<img src="${escHtml(src)}">`).join('');
+  const renderChecklist=(c)=>{
+    const d=c.datos||{}; const items=d.items||{};
+    return `<section><h2>Checklist ${escHtml(c.tipo)} · ${new Date(c.creado).toLocaleString('es-MX')}</h2><div class="grid"><p><b>KM:</b> ${escHtml(c.km)}</p><div>${fuelGaugePdf(c.combustible)}</div><p><b>Póliza:</b> ${escHtml(d.poliza_numero||'')} ${escHtml(d.poliza_vigencia||'')}</p><p><b>Obs:</b> ${escHtml(d.observaciones||'')}</p></div><table><tr><th>Punto</th><th>Aplica</th><th>OK</th><th>Obs</th></tr>${Object.entries(items).map(([k,it])=>`<tr><td>${escHtml(k)}</td><td>${escHtml(it.aplica)}</td><td>${it.ok?'SI':'NO'}</td><td>${escHtml(it.obs||'')}</td></tr>`).join('')}</table><h3>Firmas</h3><div class="grid"><div><b>Técnico/usuario</b><br>${firmaImg(d.firma_tecnico)}</div><div><b>Mantenimiento</b><br>${firmaImg(d.firma_mtto)}</div></div><div class="photos">${renderFotos(d)}</div></section>`;
+  };
+  const renderPercance=(x)=>{ const d=x.datos||{}; return `<section><h2>Reporte de percance / daño · ${new Date(x.creado).toLocaleString('es-MX')}</h2><p><b>Hechos:</b><br>${escHtml(x.hechos)}</p><p><b>Daños:</b><br>${escHtml(x.danos)}</p><p><b>Acciones:</b><br>${escHtml(x.acciones)}</p><div class="grid"><div><b>Firma técnico/usuario</b><br>${firmaImg(d.firma_tecnico)}</div><div><b>Firma mantenimiento</b><br>${firmaImg(d.firma_mtto)}</div></div><div class="photos">${renderFotos(d)}</div></section>`; };
+  res.setHeader('Content-Type','text/html; charset=utf-8');
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte ${escHtml(folio)}</title><style>body{font-family:Arial;margin:28px;color:#222}h1{border-bottom:4px solid #ff6a00;padding-bottom:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #ccc;padding:7px;text-align:left}.photos img{max-width:180px;max-height:140px;margin:6px;border:1px solid #ccc;border-radius:8px}.pdf-fuel{border:1px solid #ccc;border-radius:12px;padding:8px;text-align:center;max-width:350px}.pdf-fuel h3{margin:0 0 6px;color:#111}section{page-break-inside:avoid;border-top:2px solid #eee;margin-top:18px;padding-top:12px}.btn{background:#ff6a00;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><button class="btn no-print" onclick="window.print()">Imprimir / Guardar como PDF</button><h1>Reporte préstamo de unidad ${escHtml(folio)}</h1><div class="grid"><p><b>Tipo salida:</b> ${escHtml(loan.tipo_salida)}</p><p><b>Estado:</b> ${escHtml(loan.estado)}</p><p><b>Empresa:</b> ${escHtml(loan.empresa)}</p><p><b>OP:</b> ${escHtml(loan.op)}</p><p><b>Técnico/usuario:</b> ${escHtml(loan.tecnico_nombre)} ${escHtml(loan.tecnico_numero)}</p><p><b>Cantidad técnicos:</b> ${escHtml(loan.cantidad_tecnicos)}</p><p><b>Licencia:</b> ${escHtml(loan.licencia_numero)}</p><p><b>Unidad asignada:</b> ${escHtml(loan.unidad_asignada)}</p><p><b>Remolque:</b> ${escHtml(loan.lleva_remolque)} ${escHtml(loan.datos_remolque)}</p><p><b>Sucursal/área:</b> ${escHtml(loan.sucursal)} · ${escHtml(loan.area)}</p></div>${ch.rows.map(renderChecklist).join('')}${pe.rows.map(renderPercance).join('')}</body></html>`);
 });
 
 app.get('/', (req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
