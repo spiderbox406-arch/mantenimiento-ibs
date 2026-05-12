@@ -31,7 +31,7 @@ const imageStorage = multer.diskStorage({
 });
 const uploadImages = multer({
   storage: imageStorage,
-  limits: { fileSize: 8 * 1024 * 1024, files: 6 },
+  limits: { fileSize: 8 * 1024 * 1024, files: 30 },
   fileFilter: (req, file, cb) => {
     if(!file.mimetype.startsWith('image/')) return cb(new Error('Solo se permiten imágenes.'));
     cb(null, true);
@@ -1544,5 +1544,127 @@ app.get('/api/export/excel', requireCanExport, async (req,res)=>{
   res.send(buf);
 });
 
+
+
+// ================= MODULO AUTORIZADO: CONTROL DE UNIDADES =================
+async function initModuloUnidades(){
+  await pool.query(`
+    create table if not exists unidades_prestamos(
+      id bigserial primary key,
+      folio text,
+      tipo_salida text,
+      empresa text,
+      op text,
+      tecnico text,
+      solicitante text,
+      cantidad_tecnicos int default 0,
+      unidad text not null,
+      licencia_numero text,
+      licencia_foto text,
+      foto_op text,
+      remolque text default 'no',
+      remolque_datos text,
+      estado text not null default 'Solicitado',
+      created_by bigint references users(id),
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    );
+    create table if not exists unidades_checklists(
+      id bigserial primary key,
+      prestamo_id bigint references unidades_prestamos(id) on delete cascade,
+      tipo text not null,
+      km int,
+      combustible int,
+      checklist_json jsonb not null default '[]'::jsonb,
+      poliza_numero text,
+      poliza_vigencia text,
+      observaciones text,
+      fotos jsonb not null default '[]'::jsonb,
+      firma_tecnico text,
+      firma_mtto text,
+      created_by bigint references users(id),
+      created_at timestamptz not null default now()
+    );
+    create table if not exists unidades_incidentes(
+      id bigserial primary key,
+      prestamo_id bigint references unidades_prestamos(id) on delete cascade,
+      hechos text not null,
+      danios text,
+      accion text,
+      fotos jsonb not null default '[]'::jsonb,
+      firma_tecnico text,
+      firma_mtto text,
+      created_by bigint references users(id),
+      created_at timestamptz not null default now()
+    );
+  `);
+}
+function fileUrls(files){ return (files||[]).map(f => '/uploads/' + path.basename(f.filename)); }
+function requireMttoUnidades(req,res,next){
+  const role=String(req.session.user?.role||'').toLowerCase();
+  if(['admin','gerente','mantenimiento','tecnico'].includes(role)) return next();
+  return res.status(403).json({error:'No tienes permiso para préstamo de unidades.'});
+}
+app.get('/api/unidades/prestamos', requireLogin, async (req,res)=>{
+  const user=req.session.user;
+  const params=[]; const clauses=[];
+  const role=String(user.role||'').toLowerCase();
+  if(!['admin','gerente','mantenimiento'].includes(role)){
+    params.push(user.id); clauses.push('created_by=$1');
+  }
+  const where=buildWhere(clauses);
+  const r=await pool.query(`select * from unidades_prestamos ${where} order by created_at desc limit 300`, params);
+  res.json(r.rows);
+});
+app.post('/api/unidades/prestamos', requireLogin, uploadImages.fields([{name:'foto_op',maxCount:1},{name:'foto_licencia',maxCount:1}]), async (req,res)=>{
+  const licenciaNumero=clean(req.body.licencia || req.body.licencia_numero || '');
+  const licenciaFoto=fileUrls(req.files?.foto_licencia||[])[0]||'';
+  const unidad=clean(req.body.unidad||'');
+  if(!unidad) return res.status(400).json({error:'La unidad es obligatoria.'});
+  if(!licenciaNumero && !licenciaFoto) return res.status(400).json({error:'Captura número/folio de licencia o foto de licencia para liberar préstamo.'});
+  const r=await pool.query(`insert into unidades_prestamos(folio,tipo_salida,empresa,op,tecnico,solicitante,cantidad_tecnicos,unidad,licencia_numero,licencia_foto,foto_op,remolque,remolque_datos,created_by)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`,[
+      'UNI-'+Date.now(), clean(req.body.tipo||req.body.tipo_salida||''), clean(req.body.empresa||''), clean(req.body.op||''), clean(req.body.tecnico||''), req.session.user.name||req.session.user.username,
+      Number(req.body.cantidad||req.body.cantidad_tecnicos||0), unidad, licenciaNumero, licenciaFoto, fileUrls(req.files?.foto_op||[])[0]||'', clean(req.body.remolque||'no'), clean(req.body.remolquedatos||req.body.remolque_datos||''), req.session.user.id
+    ]);
+  await logAction(req.session.user.id,'unidad_prestamo_creado',{id:r.rows[0].id, unidad});
+  res.json(r.rows[0]);
+});
+app.post('/api/unidades/prestamos/:id/checklist', requireLogin, requireMttoUnidades, uploadImages.array('fotos', 30), async (req,res)=>{
+  const id=req.params.id;
+  const tipo=clean(req.body.tipo||'entrega');
+  let checklist=[];
+  try{ checklist=JSON.parse(req.body.checklist_json||'[]'); }catch(e){ return res.status(400).json({error:'Checklist inválido.'}); }
+  const faltan=checklist.filter(x=>x.aplica && !x.ok).map(x=>x.punto);
+  if(faltan.length) return res.status(400).json({error:'Faltan puntos revisados: '+faltan.join(', ')});
+  if(!req.body.km) return res.status(400).json({error:'KM es obligatorio.'});
+  if(!clean(req.body.firma_tecnico) || !clean(req.body.firma_mtto)) return res.status(400).json({error:'Firmas de técnico y mantenimiento son obligatorias.'});
+  const poliza=checklist.find(x=>String(x.punto||'').toLowerCase().includes('póliza')||String(x.punto||'').toLowerCase().includes('poliza'));
+  if(poliza && poliza.aplica && (!clean(req.body.poliza_numero) || !clean(req.body.poliza_vigencia))) return res.status(400).json({error:'La póliza aplica: captura número de póliza y vigencia.'});
+  const r=await pool.query(`insert into unidades_checklists(prestamo_id,tipo,km,combustible,checklist_json,poliza_numero,poliza_vigencia,observaciones,fotos,firma_tecnico,firma_mtto,created_by)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,[id,tipo,Number(req.body.km),Number(req.body.combustible||0),JSON.stringify(checklist),clean(req.body.poliza_numero),clean(req.body.poliza_vigencia),clean(req.body.observaciones),JSON.stringify(fileUrls(req.files||[])),clean(req.body.firma_tecnico),clean(req.body.firma_mtto),req.session.user.id]);
+  const estado = tipo === 'recepcion' ? 'Cerrado' : 'Entregado';
+  await pool.query('update unidades_prestamos set estado=$1, updated_at=now() where id=$2',[estado,id]);
+  await logAction(req.session.user.id,'unidad_checklist_guardado',{prestamo_id:id,tipo,estado});
+  res.json(r.rows[0]);
+});
+app.post('/api/unidades/prestamos/:id/incidente', requireLogin, requireMttoUnidades, uploadImages.array('fotos', 30), async (req,res)=>{
+  const id=req.params.id;
+  const hechos=clean(req.body.hechos||'');
+  if(!hechos) return res.status(400).json({error:'La descripción de hechos es obligatoria.'});
+  if(!clean(req.body.firmatecnico||req.body.firma_tecnico) || !clean(req.body.firmamtto||req.body.firma_mtto)) return res.status(400).json({error:'Firmas obligatorias.'});
+  const r=await pool.query(`insert into unidades_incidentes(prestamo_id,hechos,danios,accion,fotos,firma_tecnico,firma_mtto,created_by)
+    values($1,$2,$3,$4,$5,$6,$7,$8) returning *`,[id,hechos,clean(req.body.danios||''),clean(req.body.accion||''),JSON.stringify(fileUrls(req.files||[])),clean(req.body.firmatecnico||req.body.firma_tecnico),clean(req.body.firmamtto||req.body.firma_mtto),req.session.user.id]);
+  await pool.query("update unidades_prestamos set estado='Percance/daño', updated_at=now() where id=$1",[id]);
+  await logAction(req.session.user.id,'unidad_incidente_creado',{prestamo_id:id, incidente_id:r.rows[0].id});
+  res.json({...r.rows[0], url:`/unidades/incidente/${r.rows[0].id}`});
+});
+app.get('/unidades/incidente/:id', requireLogin, async (req,res)=>{
+  const r=await pool.query(`select i.*, p.folio, p.unidad, p.tecnico, p.empresa, p.op, p.tipo_salida from unidades_incidentes i join unidades_prestamos p on p.id=i.prestamo_id where i.id=$1`,[req.params.id]);
+  if(!r.rows[0]) return res.status(404).send('No encontrado');
+  const x=r.rows[0];
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte de percance ${x.folio}</title><style>body{font-family:Arial;margin:34px}h1{color:#b42318}.box{border:1px solid #ddd;border-radius:12px;padding:14px;margin:10px 0}.firmas{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:40px}.firma{border-top:1px solid #111;text-align:center;padding-top:8px}</style></head><body><h1>Reporte de descripción de hechos</h1><div class="box"><b>Folio:</b> ${esc(x.folio)}<br><b>Unidad:</b> ${esc(x.unidad)}<br><b>Técnico/usuario:</b> ${esc(x.tecnico)}<br><b>Empresa/OP:</b> ${esc(x.empresa||'')} ${esc(x.op||'')}<br><b>Tipo salida:</b> ${esc(x.tipo_salida||'')}<br><b>Fecha:</b> ${x.created_at}</div><h2>Descripción de hechos</h2><div class="box">${esc(x.hechos).replace(/\n/g,'<br>')}</div><h2>Daños detectados</h2><div class="box">${esc(x.danios||'').replace(/\n/g,'<br>')}</div><h2>Acción tomada/recomendada</h2><div class="box">${esc(x.accion||'').replace(/\n/g,'<br>')}</div><div class="firmas"><div class="firma">${esc(x.firma_tecnico||'')}<br>Técnico/usuario</div><div class="firma">${esc(x.firma_mtto||'')}<br>Mantenimiento</div></div><script>window.print()</script></body></html>`);
+});
+
 app.get('*', (req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
-initDb().then(()=> app.listen(PORT, ()=> console.log(`IBS v2 listo en puerto ${PORT}`))).catch(e=>{ console.error(e); process.exit(1); });
+initDb().then(initModuloUnidades).then(()=> app.listen(PORT, ()=> console.log(`IBS v2 + Control de Unidades listo en puerto ${PORT}`))).catch(e=>{ console.error(e); process.exit(1); });
