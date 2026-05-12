@@ -142,12 +142,16 @@ function sameKey(a,b){ return canonicalSucursal(a) === canonicalSucursal(b); }
 function isGlobalRole(role){ return ['admin','gerente','mantenimiento'].includes(String(role||'').toLowerCase()); }
 function isGlobalUser(user){ return Boolean(user && isGlobalRole(user.role)); }
 function isTecnicoRole(role){ return ['tecnico','mantenimiento','admin','gerente'].includes(String(role||'').toLowerCase()); }
-function canManageTickets(user){ return Boolean(user && ['admin','gerente','mantenimiento','tecnico'].includes(String(user.role||'').toLowerCase())); }
+function isMaintenanceAreaUser(user){
+  if(!user) return false;
+  const role = String(user.role||'').toLowerCase();
+  const area = canonicalArea(user.area_asignada || '');
+  return ['admin','gerente','mantenimiento','tecnico'].includes(role) || area === 'MANTENIMIENTO';
+}
+function canManageTickets(user){ return isMaintenanceAreaUser(user); }
 function canWorkTicket(user, ticket){
   if(!user || !ticket) return false;
-  const role = String(user.role||'').toLowerCase();
-  if(['admin','gerente','mantenimiento'].includes(role)) return true;
-  if(role === 'tecnico') return String(ticket.tecnico_username||'').toLowerCase() === String(user.username||'').toLowerCase();
+  if(isMaintenanceAreaUser(user)) return true;
   return false;
 }
 
@@ -196,9 +200,9 @@ function addTicketVisibilityClauses(user, params, clauses, alias=''){
   const p = alias ? alias + '.' : '';
   const role = String(user?.role || '').toLowerCase();
 
-  // Técnico de mantenimiento: ve los tickets que ya tomó y también los reportados disponibles de su sucursal.
+  // Personal del departamento MANTENIMIENTO: ve los tickets que ya tomó y también los reportados disponibles de su sucursal.
   // Así puede agarrar una reparación sin esperar asignación del gerente.
-  if(role === 'tecnico'){
+  if(role === 'tecnico' || canonicalArea(user?.area_asignada || '') === 'MANTENIMIENTO'){
     params.push(String(user.username || '').toLowerCase());
     const userParam = `$${params.length}`;
     if(clean(user.sucursal)){
@@ -1636,25 +1640,21 @@ app.get('/api/tickets/:id/reporte', requireLogin, async (req,res)=>{
 });
 
 // ================= MODULO AUTORIZADO: PRESTAMO DE UNIDADES =================
-function canManageUnitLoans(user){ return Boolean(user && ['admin','gerente','mantenimiento','tecnico'].includes(String(user.role||'').toLowerCase())); }
+function canManageUnitLoans(user){ return isMaintenanceAreaUser(user); }
 function sameUsername(a,b){ return String(a||'').toLowerCase() === String(b||'').toLowerCase(); }
 function canWorkUnitDelivery(user, loan){
   if(!user || !loan) return false;
-  const role=String(user.role||'').toLowerCase();
-  if(['admin','gerente','mantenimiento'].includes(role)) return true;
-  if(role==='tecnico'){
+  if(isMaintenanceAreaUser(user)){
     if(!loan.tomada_por_username) return true;
-    return sameUsername(loan.tomada_por_username, user.username);
+    return sameUsername(loan.tomada_por_username, user.username) || canonicalArea(user.area_asignada || '') === 'MANTENIMIENTO' || ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase());
   }
   return false;
 }
 function canWorkUnitReception(user, loan){
   if(!user || !loan) return false;
-  const role=String(user.role||'').toLowerCase();
-  if(['admin','gerente','mantenimiento'].includes(role)) return true;
-  if(role==='tecnico'){
+  if(isMaintenanceAreaUser(user)){
     if(!loan.recepcion_por_username) return true;
-    return sameUsername(loan.recepcion_por_username, user.username);
+    return sameUsername(loan.recepcion_por_username, user.username) || canonicalArea(user.area_asignada || '') === 'MANTENIMIENTO' || ['admin','gerente','mantenimiento'].includes(String(user.role||'').toLowerCase());
   }
   return false;
 }
@@ -1695,7 +1695,7 @@ app.post('/api/unidad-prestamos', requireLogin, uploadImages.fields([{name:'foto
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/tomar', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico, Mantenimiento, Gerente o Admin puede tomar la entrega.'});
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede tomar la entrega.'});
   const user=req.session.user;
   const r=await pool.query(`update unidad_prestamos
     set tomada_por_id=$1, tomada_por_username=$2, tomada_por_nombre=$3, tomada_en=now(), estado='EN ENTREGA', actualizado=now()
@@ -1709,7 +1709,7 @@ app.post('/api/unidad-prestamos/:folio/tomar', requireLogin, async (req,res)=>{
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/tomar-recepcion', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico, Mantenimiento, Gerente o Admin puede tomar la recepción.'});
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede tomar la recepción.'});
   const user=req.session.user;
   const r=await pool.query(`update unidad_prestamos
     set recepcion_por_id=$1, recepcion_por_username=$2, recepcion_por_nombre=$3, recepcion_en=now(), estado='EN RECEPCION', actualizado=now()
@@ -1723,7 +1723,7 @@ app.post('/api/unidad-prestamos/:folio/tomar-recepcion', requireLogin, async (re
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/asignar', requireLogin, async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico/Mantenimiento/Gerente/Admin puede asignar unidad.'});
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede asignar unidad.'});
   const actual=await pool.query('select * from unidad_prestamos where folio=$1',[req.params.folio]);
   if(!actual.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
   if(!canWorkUnitDelivery(req.session.user, actual.rows[0])) return res.status(403).json({error:'Esta entrega la tomó otro técnico.'});
@@ -1746,7 +1746,7 @@ function validarChecklistUnidad(b){
   return '';
 }
 app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fields([{name:'fotos',maxCount:20}]), async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico/Mantenimiento/Gerente/Admin puede guardar checklist.'});
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede guardar checklist.'});
   const folio=req.params.folio;
   const loan=await pool.query('select * from unidad_prestamos where folio=$1', [folio]);
   if(!loan.rows[0]) return res.status(404).json({error:'Solicitud no encontrada.'});
@@ -1771,7 +1771,7 @@ app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fi
   res.json(r.rows[0]);
 });
 app.post('/api/unidad-prestamos/:folio/percance', requireLogin, uploadImages.fields([{name:'fotos',maxCount:20}]), async (req,res)=>{
-  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo Técnico/Mantenimiento/Gerente/Admin puede registrar percance.'});
+  if(!canManageUnitLoans(req.session.user)) return res.status(403).json({error:'Solo personal del departamento Mantenimiento puede registrar percance.'});
   const b=req.body||{};
   if(!clean(b.hechos)) return res.status(400).json({error:'Descripción de hechos obligatoria.'});
   if(!clean(b.firma_tecnico) || !clean(b.firma_mtto)) return res.status(400).json({error:'Firmas obligatorias.'});
