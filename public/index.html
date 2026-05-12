@@ -264,11 +264,12 @@ function fmt(d){return d?new Date(d).toLocaleString():'-'}
 function sc(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replaceAll(' ','')}
 function isAdmin(){return me && me.role==='admin'}
 function canExport(){return me && (me.role==='admin' || me.can_export===true)}
-function esPersonalMantenimiento(){return me && (['admin','gerente','mantenimiento','tecnico'].includes(String(me.role||'').toLowerCase()) || normalizeKey(me.area_asignada||'')==='mantenimiento')}
-function puedeExportarPdf(){return esPersonalMantenimiento()}
+function esAreaMantenimientoUsuario(u=me){return Boolean(u && String(u.area_asignada||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').includes('MANTENIMIENTO'))}
+function esGerenteSupervisorOperaciones(u=me){const r=String(u?.role||'').toLowerCase(); const a=String(u?.area_asignada||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''); return Boolean(u && (['admin','gerente','supervisor'].includes(r) || ((r==='operaciones'||r==='usuario_area'||r==='usuario') && (a.includes('OPERACIONES')||a.includes('PRODUCCION')))))}
+function puedeExportarPdf(){return me && (['admin','gerente','mantenimiento','tecnico','supervisor'].includes(String(me.role||'').toLowerCase()) || esAreaMantenimientoUsuario(me))}
 function isGerencia(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
 function esTecnico(){return me && String(me.role||'').toLowerCase()==='tecnico'}
-function puedeGestionarMtto(){return esPersonalMantenimiento()}
+function puedeGestionarMtto(){return Boolean(me && (esAreaMantenimientoUsuario(me) || ['admin','gerente','mantenimiento','tecnico'].includes(String(me.role||'').toLowerCase())))}
 function puedeAceptarTicket(t){return puedeGestionarMtto() && (!t.tecnico_username || String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase() || isGerencia())}
 function sameKey(a,b){return normalize(a)===normalize(b)}
 function esMatriz(s){return sameKey(s,'CHIHUAHUA')}
@@ -302,7 +303,7 @@ function canonicalSucursalFront(s){const k=normalizeKey(s);return SUCURSAL_ALIAS
 function sameLoose(a,b){return normalizeKey(canonicalSucursalFront(a))===normalizeKey(canonicalSucursalFront(b))}
 function rolActual(){return String(me?.role||'').toLowerCase()}
 function esUsuarioArea(){return ['operaciones','usuario_area','usuario'].includes(rolActual())}
-function puedeVerTodoFrontend(){return ['admin','gerente','mantenimiento'].includes(rolActual()) || normalizeKey(me?.area_asignada||'')==='mantenimiento'}
+function puedeVerTodoFrontend(){return ['admin','gerente','mantenimiento'].includes(rolActual())}
 function perteneceASucursalArea(row){
   if(!me) return false;
   if(puedeVerTodoFrontend()) return true;
@@ -316,7 +317,8 @@ function perteneceASucursalArea(row){
 function activosVisibles(){return (activos||[]).filter(perteneceASucursalArea)}
 function ticketsVisibles(){return (tickets||[]).filter(t=>{
   if(!me) return false;
-  if(esPersonalMantenimiento()) return !me.sucursal || !t.sucursal || sameLoose(t.sucursal||'', me.sucursal||'');
+  if(puedeVerTodoFrontend() || esAreaMantenimientoUsuario(me)) return true;
+  if(rolActual()==='tecnico') return String(t.tecnico_username||'').toLowerCase()===String(me.username||'').toLowerCase() || String(t.estado||'')==='Reportado';
   return sameLoose(t.sucursal||'', me.sucursal||'') && sameLoose(t.area||'', me.area_asignada||'');
 })}
 function fmtMin(min){
@@ -455,7 +457,16 @@ function selectReportante(id){
   if(t && !t.value)t.value=selectedReporter.telefono||'';
 }
 
-function crearTicketCard(){return `<div class="card"><h2>Reportar falla</h2>${assetSearchBlock()}<div class="grid3"><div><label>Persona que reporta</label><input id="solicitante" placeholder="Busca por nombre o número" oninput="reportanteSuggest(this.value)" autocomplete="off"><div id="reportanteResults" class="asset-results" style="display:none"></div></div><div><label>Teléfono/extensión</label><input id="telSol" placeholder="WhatsApp, teléfono o extensión"></div><div><label>Prioridad</label><select id="prioridad"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div><div><label>Tipo de falla</label><select id="tipoFalla"><option>Mecánica</option><option>Eléctrica</option><option>Neumática</option><option>Ajuste</option><option>Operador</option><option>Otro</option></select></div><div><label>Número empleado</label><input id="empSol" placeholder="Opcional"></div></div><label>Falla detectada</label><textarea id="falla" placeholder="Describe la falla..."></textarea><label>Fotos de evidencia inicial</label><input id="fotosReporte" type="file" accept="image/*" multiple><button class="btn-orange" onclick="crearTicket()">Crear ticket</button></div>`}
+function crearTicketCard(){return `<div class="card"><h2>Reportar falla</h2>${assetSearchBlock()}<div class="grid3"><div><label>Persona que reporta</label><input id="solicitante" placeholder="Busca por nombre o número" oninput="reportanteSuggest(this.value)" autocomplete="off"><div id="reportanteResults" class="asset-results" style="display:none"></div></div><div><label>Teléfono/extensión</label><input id="telSol" placeholder="WhatsApp, teléfono o extensión"></div><div><label>Prioridad</label><select id="prioridad"><option>Normal</option><option>Alta</option><option>Urgente</option></select></div><div><label>Tipo de falla</label><select id="tipoFalla"><option>Mecánica</option><option>Eléctrica</option><option>Neumática</option><option>Hidráulica</option><option>Seguridad</option><option>Ajuste</option><option>Operador</option><option>Otro</option></select></div><div><label>Condición del equipo</label><select id="condicionEquipo" onchange="actualizarTiempoMuertoTicket()"><option value="TRABAJA NORMAL CON ALERTA">Trabaja normal con alerta</option><option value="TRABAJA LIMITADO">Trabaja limitado</option><option value="EQUIPO DETENIDO">Equipo detenido</option><option value="PARO DE SEGURIDAD">Paro de seguridad</option></select></div><div><label>¿Cuenta tiempo muerto?</label><select id="cuentaTiempoMuerto"><option value="NO">No - alerta preventiva</option><option value="PARCIAL">Parcial / afectación</option><option value="SI">Sí - equipo detenido</option></select></div><div><label>Número empleado</label><input id="empSol" placeholder="Opcional"></div></div><div class="notice-box" id="ayudaCondicionTicket"><b>Alerta preventiva:</b> si el equipo tiene falla pero sigue trabajando, no suma tiempo muerto.</div><label>Falla detectada</label><textarea id="falla" placeholder="Describe la falla..."></textarea><label>Fotos de evidencia inicial</label><input id="fotosReporte" type="file" accept="image/*" multiple><button class="btn-orange" onclick="crearTicket()">Crear ticket</button></div>`}
+function actualizarTiempoMuertoTicket(){
+  const c=val('condicionEquipo');
+  const sel=byId('cuentaTiempoMuerto');
+  const ayuda=byId('ayudaCondicionTicket');
+  if(!sel) return;
+  if(c==='TRABAJA NORMAL CON ALERTA'){sel.value='NO'; if(ayuda) ayuda.innerHTML='<b>Alerta preventiva:</b> el equipo trabaja, no suma tiempo muerto.';}
+  else if(c==='TRABAJA LIMITADO'){sel.value='PARCIAL'; if(ayuda) ayuda.innerHTML='<b>Afectación parcial:</b> el equipo trabaja limitado; se separa en reportes.';}
+  else {sel.value='SI'; if(ayuda) ayuda.innerHTML='<b>Tiempo muerto:</b> equipo detenido o paro de seguridad.';}
+}
 async function crearTicket(){
   try{
     if(!selectedAsset){
@@ -478,6 +489,8 @@ async function crearTicket(){
     fd.append('falla',val('falla'));
     fd.append('prioridad',val('prioridad')||'Normal');
     fd.append('tipo_falla',val('tipoFalla'));
+    fd.append('condicion_equipo',val('condicionEquipo'));
+    fd.append('cuenta_tiempo_muerto',val('cuentaTiempoMuerto'));
     filesOf('fotosReporte').forEach(f=>fd.append('fotos_reporte',f));
     const nuevo = await api('/api/tickets',{method:'POST',body:fd});
     selectedAsset=null;
@@ -491,7 +504,7 @@ async function crearTicket(){
   }
 }
 function ticketsView(){return `${crearTicketCard()}<div class="card"><h2>Buscar tickets</h2><div class="searchbox"><input id="qTickets" oninput="filterTickets(this.value)" placeholder="Buscar por ticket, activo, estado, sucursal, área, falla o solicitante"></div><div id="ticketsTable">${tablaTickets(ticketsVisibles())}</div></div>`}
-function filterTickets(q){const nq=normalize(q);const rows=ticketsVisibles().filter(t=>normalize([t.id,t.activo,t.activo_descripcion,t.area,t.sucursal,t.estado,t.falla,t.solicitante].join(' ')).includes(nq));document.getElementById('ticketsTable').innerHTML=tablaTickets(rows)}
+function filterTickets(q){const nq=normalize(q);const rows=ticketsVisibles().filter(t=>normalize([t.id,t.activo,t.activo_descripcion,t.area,t.sucursal,t.estado,t.falla,t.solicitante,t.tipo_falla,t.condicion_equipo,t.cuenta_tiempo_muerto].join(' ')).includes(nq));document.getElementById('ticketsTable').innerHTML=tablaTickets(rows)}
 
 function puedeLiberarTicket(t){
   if(!me || !t) return false;
@@ -574,7 +587,7 @@ function fotosHtml(arr){
   if(!fotos.length) return '';
   return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${fotos.map(p=>`<a href="${esc(p)}" target="_blank"><img src="${esc(p)}" style="width:70px;height:70px;object-fit:cover;border-radius:10px;border:1px solid #ddd"></a>`).join('')}</div>`;
 }
-function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio atención: ${fmt(t.iniciado)}</span><br><span class="muted">Técnico libera: ${fmt(t.terminado)}</span><br><span class="muted">Operación libera: ${fmt(t.liberado)}</span></td><td><div class="time-box-total"><b>Total muerto</b><br><span class="time-compact">${fmtMin(t.tiempos.muertoTotalMin)}</span><div class="time-detail">${fmtMinDetalle(t.tiempos.muertoTotalMin)}</div></div><div class="time-box-mtto"><b>MTTO</b><br>${fmtMin(t.tiempos.mttoMin)} <span class="muted">(${fmtMinDetalle(t.tiempos.mttoMin)})</span></div><div class="time-box-prod"><b>Operaciones</b><br>${fmtMin(t.tiempos.produccionMin)} <span class="muted">(${fmtMinDetalle(t.tiempos.produccionMin)})</span></div></td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}<br>${puedeExportarPdf()?`<button class="btn-dark" onclick="abrirPdfTicket('${t.id}')">PDF</button>`:''}</td></tr>`).join('')}</tbody></table>`}
+function tablaTickets(rows){if(!rows.length)return `<div class="empty">Sin tickets.</div>`;return `<table><thead><tr><th>Ticket</th><th>Activo</th><th>Falla</th><th>Estado</th><th>Tiempos reales</th><th>Acciones</th></tr></thead><tbody>${rows.map(t=>`<tr><td><b>${t.id}</b><br>${fmt(t.creado)}<br>${esc(t.prioridad)}</td><td><b>${esc(t.activo)}</b><br>${esc(t.activo_descripcion)}<br>${esc(t.area)}<br><span class="muted">${esc(t.ubicacion||'')}</span></td><td>${esc(t.falla)}${fotosHtml(t.fotos_reporte)}${fotosHtml(t.fotos_trabajo)}<br><span class="muted">Solicita: ${esc(t.solicitante)}</span><br><span class="muted">${esc(t.tipo_falla)}</span><br><span class="pill">${esc(t.condicion_equipo||'Sin condición')}</span><br><span class="muted">Tiempo muerto: ${esc(t.cuenta_tiempo_muerto||'SI')}</span></td><td><span class="status ${sc(t.estado)}">${esc(t.estado)}</span><br><span class="muted">${esc(t.responsableActual)}</span><br><span class="muted">Inicio atención: ${fmt(t.iniciado)}</span><br><span class="muted">Técnico libera: ${fmt(t.terminado)}</span><br><span class="muted">Operación libera: ${fmt(t.liberado)}</span></td><td><div class="time-box-total"><b>Total muerto</b><br><span class="time-compact">${fmtMin(t.tiempos.muertoTotalMin)}</span><div class="time-detail">${fmtMinDetalle(t.tiempos.muertoTotalMin)}</div></div><div class="time-box-mtto"><b>MTTO</b><br>${fmtMin(t.tiempos.mttoMin)} <span class="muted">(${fmtMinDetalle(t.tiempos.mttoMin)})</span></div><div class="time-box-prod"><b>Operaciones</b><br>${fmtMin(t.tiempos.produccionMin)} <span class="muted">(${fmtMinDetalle(t.tiempos.produccionMin)})</span></div></td><td>${acciones(t)}<br>${btnWhatsTicket(t,'Aviso de mantenimiento IBS')}<br>${puedeExportarPdf()?`<button class="btn-dark" onclick="abrirPdfTicket('${t.id}')">PDF</button>`:''}</td></tr>`).join('')}</tbody></table>`}
 function activosView(){return `<div class="card"><h2>Importar activos desde Excel</h2><p class="muted">Acepta el formato ACTIVOS MATRIZ - SUCURSALES. Solo toma: NUM ACTIVO, TIPO, ESTATUS, DESCRIPCION, MARCA, MODELO, SUCURSAL, AREA, UBICACION y USUARIO. Ignora costos, facturas, fechas y demás columnas.</p>${isAdmin()?`<input type="file" id="excelActivos" accept=".xlsx,.xls"><button class="btn-orange" onclick="importar('/api/import/activos','excelActivos')">Importar activos</button>`:'<p class="muted">Solo admin puede importar.</p>'}</div>${isAdmin()?`<div class="card"><h2>Agregar activo manual</h2><div class="grid4"><input id="aNum" placeholder="Número"><input id="aDesc" placeholder="Descripción"><input id="aArea" placeholder="Área"><select id="aTipo"><option>Máquina</option><option>Herramienta</option><option>Equipo</option></select><input id="aSuc" placeholder="Sucursal"><input id="aUbi" placeholder="Ubicación"><input id="aMarca" placeholder="Marca"><input id="aModelo" placeholder="Modelo"><input id="aUsuario" placeholder="Usuario responsable"><input id="aEstatus" placeholder="Estatus" value="VIGENTE"></div><button class="btn-orange" onclick="agregarActivo()">Guardar activo</button></div>`:''}<div class="card"><h2>Activos</h2><div class="searchbox"><input id="qActivos" oninput="filterActivos(this.value)" placeholder="Buscar por palabra clave: activo, descripción, área, tipo, sucursal, ubicación, marca, usuario, estatus"></div><div id="activosTable">${tablaActivos(activosVisibles())}</div></div>`}
 async function importar(endpoint,inputId){showLoading('Importando Excel...');try{let file=document.getElementById(inputId).files[0];if(!file)return alert('Selecciona un Excel');let fd=new FormData();fd.append('archivo',file);let r=await api(endpoint,{method:'POST',body:fd});alert(`Importado\nAgregados: ${r.agregados}\nActualizados: ${r.actualizados}\nOmitidos: ${r.omitidos}`);render()}catch(e){alert('Error: '+e.message)}finally{hideLoading()}}
 async function agregarActivo(){if(!isAdmin()) return alert('Solo administrador puede agregar activos');await api('/api/activos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({numero:aNum.value,descripcion:aDesc.value,area:aArea.value,tipo:aTipo.value,sucursal:aSuc.value,ubicacion:aUbi.value,marca:aMarca.value,modelo:aModelo.value,usuario:aUsuario.value,estatus:aEstatus.value})});render()}
@@ -658,13 +671,15 @@ async function eliminarUsuario(id){
 }
 
 async function eliminarUsuario(id){if(!confirm('¿Eliminar este usuario definitivamente? Esta acción no se puede deshacer.'))return;await api('/api/users/'+id,{method:'DELETE'});render()}
-function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Vista compacta: el sistema muestra horas/minutos para leer rápido, pero conserva los minutos exactos para control y Excel.</p><p><b>Tiempo muerto total:</b> <span class="time-compact">${fmtMin(reportes.muertoTotalMin||0)}</span> <span class="muted">(${fmtMinDetalle(reportes.muertoTotalMin||0)})</span></p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br><span class="time-compact">${fmtMin(reportes.mttoMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.mttoMin||0)}</div><div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br><span class="time-compact">${fmtMin(reportes.produccionMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.produccionMin||0)}</div><div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(ticketsVisibles())}`}
+function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Vista compacta: el sistema muestra horas/minutos para leer rápido, pero conserva los minutos exactos para control y Excel.</p><p><b>Tiempo muerto total:</b> <span class="time-compact">${fmtMin(reportes.muertoTotalMin||0)}</span> <span class="muted">(${fmtMinDetalle(reportes.muertoTotalMin||0)})</span></p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br><span class="time-compact">${fmtMin(reportes.mttoMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.mttoMin||0)}</div><div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br><span class="time-compact">${fmtMin(reportes.produccionMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.produccionMin||0)}</div><div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Por condición de equipo',reportes.porCondicionEquipo||{})}${simpleStats('Tiempo muerto por tipo de falla',reportes.muertoPorTipoFalla||{})}${simpleStats('Alertas preventivas por equipo',reportes.alertasPorActivo||{})}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(ticketsVisibles())}`}
 function simpleStats(title,obj){const rows=topEntries(obj,8);return `<div class="card"><h2>${title}</h2><div class="stats-list">${rows.map(([k,v])=>`<div class="stat-row"><b>${esc(k)}</b><span>${v}</span></div>`).join('')||'<p class="muted">Sin datos</p>'}</div></div>`}
 
 
 
 // ================= MODULO AUTORIZADO: PRESTAMO DE UNIDADES =================
-function puedeGestionarUnidades(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
+function puedeGestionarUnidades(){return Boolean(me && (esAreaMantenimientoUsuario(me) || esGerenteSupervisorOperaciones(me)))}
+function puedeTomarUnidadMtto(){return Boolean(me && (esAreaMantenimientoUsuario(me) || ['admin','mantenimiento'].includes(String(me.role||'').toLowerCase())))}
+function puedeAsignarUnidadOperaciones(){return esGerenteSupervisorOperaciones(me)}
 function empleadoLabel(e){return `${e.numero_empleado||''} · ${e.nombre||e.name||''} · ${e.area||e.area_asignada||''}`}
 function empleadosParaUnidad(){return (empleadosReportantes||[]).filter(e=>!me.sucursal || sameLoose(e.sucursal||'', me.sucursal||''))}
 function buscarEmpleadoUnidad(q){
@@ -683,7 +698,7 @@ function seleccionarEmpleadoUnidad(e){
   byId('unidadEmpleadoResults').innerHTML='';
 }
 function fuelAngle(pct){return -180 + (Number(pct||0)*180/100)}
-function fuelText(pct){pct=Number(pct||0); if(pct===0)return 'E / 0%'; if(pct===25)return '1/4 / 25%'; if(pct===50)return '1/2 / 50%'; if(pct===75)return '3/4 / 75%'; if(pct===100)return 'F / 100%'; return pct+'%'}
+function fuelText(pct){pct=Number(pct||0); if(pct<=0)return 'Empty / 0%'; if(pct>=100)return 'Full / 100%'; return pct+'%'}
 function setFuel(prefix,pct){const el=byId(prefix+'Combustible'); if(el){el.value=pct; updateFuelGauge(prefix);}}
 function updateFuelGauge(prefix='entrega'){
   const pct=Number(val(prefix+'Combustible')||0);
@@ -693,7 +708,7 @@ function updateFuelGauge(prefix='entrega'){
 }
 function fuelGauge(prefix='entrega', value=50){
   setTimeout(()=>updateFuelGauge(prefix),50);
-  return `<div class="fuel-wrap"><h3>Nivel de combustible</h3><div class="fuel-gauge"><div class="fuel-arc"></div><div class="fuel-mark fuel-e">E</div><div class="fuel-mark fuel-q">1/4</div><div class="fuel-mark fuel-h">1/2</div><div class="fuel-mark fuel-tq">3/4</div><div class="fuel-mark fuel-f">F</div><div id="${prefix}Needle" class="fuel-needle"></div><div class="fuel-center"></div></div><input class="fuel-slider" id="${prefix}Combustible" type="range" min="0" max="100" step="25" value="${value}" oninput="updateFuelGauge('${prefix}')"><h2 id="${prefix}FuelLabel">${fuelText(value)}</h2><div class="fuel-quick"><button onclick="setFuel('${prefix}',0)" type="button">E</button><button onclick="setFuel('${prefix}',25)" type="button">1/4</button><button onclick="setFuel('${prefix}',50)" type="button">1/2</button><button onclick="setFuel('${prefix}',75)" type="button">3/4</button><button onclick="setFuel('${prefix}',100)" type="button">F</button></div><div class="muted" style="color:white">El mismo valor se dibuja en pantalla y en el PDF.</div></div>`
+  return `<div class="fuel-wrap"><h3>Nivel de combustible</h3><div class="fuel-gauge"><div class="fuel-arc"></div><div class="fuel-mark fuel-e">E</div><div class="fuel-mark fuel-q">1/4</div><div class="fuel-mark fuel-h">1/2</div><div class="fuel-mark fuel-tq">3/4</div><div class="fuel-mark fuel-f">F</div><div id="${prefix}Needle" class="fuel-needle"></div><div class="fuel-center"></div></div><input class="fuel-slider" id="${prefix}Combustible" type="range" min="0" max="100" step="1" value="${value}" oninput="updateFuelGauge('${prefix}')"><h2 id="${prefix}FuelLabel">${fuelText(value)}</h2><div class="fuel-quick"><button onclick="setFuel('${prefix}',0)" type="button">E</button><button onclick="setFuel('${prefix}',25)" type="button">1/4</button><button onclick="setFuel('${prefix}',50)" type="button">1/2</button><button onclick="setFuel('${prefix}',75)" type="button">3/4</button><button onclick="setFuel('${prefix}',100)" type="button">F</button></div><div class="muted" style="color:white">El mismo valor se dibuja en pantalla y en el PDF.</div></div>`
 }
 function unidadPrestamosView(){
   const admin=puedeGestionarUnidades();
@@ -704,18 +719,18 @@ function unidadPrestamosView(){
   if(!admin){
     return `<div class="card"><h2>Préstamo de unidades</h2><p class="muted">El solicitante crea la orden. Mantenimiento toma la entrega, entrega la unidad y después cualquier técnico de mantenimiento puede tomar la recepción.</p>${solicitudUnidadCard()}</div><div class="card"><h2>Mis solicitudes</h2>${tablaPrestamosUnidad(rows,false)}</div>`;
   }
-  return `<div class="card"><h2>Préstamo de unidades</h2><p class="muted">Flujo nuevo: cualquier técnico de mantenimiento puede tomar una entrega. Cuando la unidad queda prestada pasa a una ficha aparte y cualquier técnico disponible puede tomar la recepción.</p>${solicitudesMttoPanel(rows)}</div>
+  return `<div class="card"><h2>Préstamo de unidades</h2><p class="muted">Flujo nuevo: Gerente/Supervisor asigna unidad; después cualquier personal del área Mantenimiento toma el checklist/entrega. Al volver, cualquier personal de Mantenimiento puede tomar la recepción.</p>${solicitudesMttoPanel(rows)}</div>
   <div class="card"><h2>Solicitudes nuevas / en entrega</h2>${tablaPrestamosUnidad(abiertas,true,'entrega')}</div>
   <div class="card"><h2>Unidades prestadas / pendientes de recibir</h2>${tablaPrestamosUnidad(prestadas,true,'recepcion')}</div>
   <div class="card"><h2>Cerradas / historial reciente</h2>${tablaPrestamosUnidad(cerradas.slice(0,80),true,'cerradas')}</div>`;
 }
 function solicitudUnidadCard(){
-  return `<div class="notice-box"><b>Regla:</b> el solicitante no asigna unidad. Mantenimiento revisa disponibilidad y asigna la unidad.</div><div class="grid3"><div><label>Tipo de salida</label><select id="u_tipo_salida"><option>Servicio con técnicos</option><option>Entrega de material/bandas</option><option>Préstamo personal de unidad</option></select></div><div><label>Empresa / cliente</label><input id="u_empresa" placeholder="Empresa visitada"></div><div><label>OP / Servicio</label><input id="u_op" placeholder="OP si aplica"></div></div><label>Técnico/usuario recibe</label><input id="unidadEmpleadoSearch" oninput="buscarEmpleadoUnidad(this.value)" placeholder="Busca por número de empleado o nombre"><input id="unidadEmpleadoId" type="hidden"><input id="unidadEmpleadoNombre" type="hidden"><input id="unidadEmpleadoNumero" type="hidden"><div id="unidadEmpleadoResults"></div><div class="grid3"><div><label>Cantidad de técnicos</label><input id="u_cantidad_tecnicos" type="number" min="1" value="1"></div><div><label>Número / folio de licencia</label><input id="u_licencia_numero" placeholder="Número de licencia"></div><div><label>Foto de licencia</label><input id="u_foto_licencia" type="file" accept="image/*"></div></div><label>¿Lleva remolque?</label><select id="u_lleva_remolque" onchange="byId('u_remolque_box').style.display=this.value==='SI'?'block':'none'"><option value="NO">No</option><option value="SI">Sí</option></select><div id="u_remolque_box" style="display:none"><label>Datos del remolque</label><textarea id="u_datos_remolque" placeholder="Eco, placas, descripción"></textarea></div><button class="btn-orange" onclick="crearSolicitudUnidad()">Crear solicitud de préstamo</button>`;
+  return `<div class="notice-box"><b>Regla:</b> el solicitante no asigna unidad. Gerente/Supervisor de Operaciones asigna la unidad. Mantenimiento solo hace checklist, entrega y recepción.</div><div class="grid3"><div><label>Tipo de salida</label><select id="u_tipo_salida"><option>Servicio con técnicos</option><option>Entrega de material/bandas</option><option>Préstamo personal de unidad</option></select></div><div><label>Empresa / cliente</label><input id="u_empresa" placeholder="Empresa visitada"></div><div><label>OP / Servicio</label><input id="u_op" placeholder="OP si aplica"></div></div><label>Técnico/usuario recibe</label><input id="unidadEmpleadoSearch" oninput="buscarEmpleadoUnidad(this.value)" placeholder="Busca por número de empleado o nombre"><input id="unidadEmpleadoId" type="hidden"><input id="unidadEmpleadoNombre" type="hidden"><input id="unidadEmpleadoNumero" type="hidden"><div id="unidadEmpleadoResults"></div><div class="grid3"><div><label>Cantidad de técnicos</label><input id="u_cantidad_tecnicos" type="number" min="1" value="1"></div><div><label>Número / folio de licencia</label><input id="u_licencia_numero" placeholder="Número de licencia"></div><div><label>Foto de licencia</label><input id="u_foto_licencia" type="file" accept="image/*"></div></div><label>¿Lleva remolque?</label><select id="u_lleva_remolque" onchange="byId('u_remolque_box').style.display=this.value==='SI'?'block':'none'"><option value="NO">No</option><option value="SI">Sí</option></select><div id="u_remolque_box" style="display:none"><label>Datos del remolque</label><textarea id="u_datos_remolque" placeholder="Eco, placas, descripción"></textarea></div><button class="btn-orange" onclick="crearSolicitudUnidad()">Crear solicitud de préstamo</button>`;
 }
 function solicitudesMttoPanel(rows){
   const nuevas=(rows||[]).filter(x=>['SOLICITADO','TOMADA','ASIGNADO','EN ENTREGA'].includes(String(x.estado||''))).length;
   const prestadas=(rows||[]).filter(x=>['UNIDAD PRESTADA','ENTREGADA','EN_SERVICIO','EN RECEPCION'].includes(String(x.estado||''))).length;
-  return `<div class="notice-box"><b>Mantenimiento:</b> toma entregas y recepciones libremente. No depende de que sea el mismo técnico; si cambia turno, otro puede recibir la unidad.</div><div class="kpis"><div class="kpi"><b>${nuevas}</b><small>Solicitudes / entrega</small></div><div class="kpi"><b>${prestadas}</b><small>Unidades prestadas</small></div></div>`;
+  return `<div class="notice-box"><b>Operación/Mantenimiento:</b> Gerente/Supervisor asigna unidad. Personal del área Mantenimiento toma entregas y recepciones libremente; si cambia turno, otro puede recibir la unidad.</div><div class="kpis"><div class="kpi"><b>${nuevas}</b><small>Solicitudes / entrega</small></div><div class="kpi"><b>${prestadas}</b><small>Unidades prestadas</small></div></div>`;
 }
 function tablaPrestamosUnidad(rows,admin,seccion=''){
   if(!rows.length)return `<div class="empty">Sin solicitudes en esta sección.</div>`;
@@ -730,13 +745,15 @@ function accionesPrestamoUnidad(p,seccion=''){
   const esPrestada=['UNIDAD PRESTADA','ENTREGADA','EN_SERVICIO','EN RECEPCION'].includes(estado);
   let html='';
   if(esEntrega){
-    html += !tomada ? `<button class="btn-orange" onclick="tomarPrestamoUnidad('${p.folio}')">Tomar entrega</button>` : `<span class="pill">Entrega: ${esc(p.tomada_por_nombre||p.tomada_por_username||'MTTO')}</span>`;
-    html += `<button class="btn-blue" onclick="asignarUnidadPrestamo('${p.folio}')">Asignar unidad</button>`;
-    html += `<button class="btn-blue" onclick="abrirChecklistUnidad('${p.folio}','ENTREGA')">Checklist entrega</button>`;
+    if(!p.unidad_asignada && puedeAsignarUnidadOperaciones()) html += `<button class="btn-blue" onclick="asignarUnidadPrestamo('${p.folio}')">Asignar unidad</button>`;
+    if(p.unidad_asignada){
+      html += !tomada ? (puedeTomarUnidadMtto()?`<button class="btn-orange" onclick="tomarPrestamoUnidad('${p.folio}')">Tomar entrega</button>`:`<span class="pill">Pendiente checklist MTTO</span>`) : `<span class="pill">Entrega: ${esc(p.tomada_por_nombre||p.tomada_por_username||'MTTO')}</span>`;
+      if(puedeTomarUnidadMtto()) html += `<button class="btn-blue" onclick="abrirChecklistUnidad('${p.folio}','ENTREGA')">Checklist entrega</button>`;
+    }
   }
   if(esPrestada){
-    html += !recepcion ? `<button class="btn-green" onclick="tomarRecepcionUnidad('${p.folio}')">Tomar recepción</button>` : `<span class="pill">Recepción: ${esc(p.recepcion_por_nombre||p.recepcion_por_username||'MTTO')}</span>`;
-    html += `<button class="btn-green" onclick="abrirChecklistUnidad('${p.folio}','RECEPCION')">Checklist recepción</button>`;
+    html += !recepcion ? (puedeTomarUnidadMtto()?`<button class="btn-green" onclick="tomarRecepcionUnidad('${p.folio}')">Tomar recepción</button>`:`<span class="pill">Pendiente recepción MTTO</span>`) : `<span class="pill">Recepción: ${esc(p.recepcion_por_nombre||p.recepcion_por_username||'MTTO')}</span>`;
+    if(puedeTomarUnidadMtto()) html += `<button class="btn-green" onclick="abrirChecklistUnidad('${p.folio}','RECEPCION')">Checklist recepción</button>`;
   }
   html += `<button class="btn-red" onclick="abrirPercanceUnidad('${p.folio}')">Percance/daño</button>`;
   html += `${puedeExportarPdf()?`<button class="btn-dark" onclick="abrirPdfUnidad('${p.folio}')">PDF</button>`:''}`;
@@ -801,7 +818,7 @@ function abrirAsignarUnidadPrestamo(folio){
   const div=document.createElement('div'); div.id='modalAsignarUnidad'; div.className='modal-backdrop';
   div.innerHTML=`<div class="modal-card" style="max-width:820px;max-height:92vh;overflow:auto">
     <h2>Asignar unidad · ${esc(folio)}</h2>
-    <p class="muted">Selecciona una unidad disponible. Puedes buscar por número económico, placas, descripción, marca, modelo o ubicación.</p>
+    <p class="muted">Gerente/Supervisor de Operaciones selecciona una unidad disponible. Puedes buscar por número económico, placas, descripción, marca, modelo o ubicación.</p>
     <div class="notice-box"><b>Solicitud:</b> ${esc(p.empresa||'')} · ${esc(p.op||'')}<br><b>Recibe:</b> ${esc(p.tecnico_nombre||'')} ${esc(p.tecnico_numero||'')}</div>
     <label>Buscar unidad disponible</label>
     <input id="unidadAsignadaSearch" placeholder="Ejemplo: NP300, Silverado, eco 125, placas..." oninput="buscarUnidadAsignacion('${esc(folio)}', this.value)">
@@ -844,14 +861,26 @@ function seleccionarUnidadAsignacion(label){
   if(inp) inp.value=v;
   if(sel){sel.style.display='block'; sel.innerHTML=`<b>Seleccionada:</b> ${esc(v)}`;}
 }
+function usuariosMantenimientoParaAviso(){return (empleados||[]).filter(u=>esAreaMantenimientoUsuario(u) || ['mantenimiento'].includes(String(u.role||'').toLowerCase()))}
+function mensajeChecklistUnidad(p){return `MANTENIMIENTO IBS - UNIDAD ASIGNADA PARA CHECKLIST
+
+Folio: ${p.folio||''}
+Unidad: ${p.unidad_asignada||''}
+Empresa: ${p.empresa||''}
+OP: ${p.op||''}
+Usuario/Técnico recibe: ${p.tecnico_nombre||''}
+
+Favor de tomar la orden y realizar checklist de entrega.
+${location.origin}`}
+function abrirAvisoMantenimientoUnidad(p){const rows=usuariosMantenimientoParaAviso(); const primero=rows[0]||{}; abrirWhatsApp(primero.telefono||'', mensajeChecklistUnidad(p));}
+function pantallaAvisoMantenimientoUnidad(p){const div=document.createElement('div'); div.id='modalAvisoMttoUnidad'; div.className='modal-backdrop'; div.innerHTML=`<div class="modal-card"><h2>Unidad asignada</h2><p class="muted">Ahora avisa al equipo de Mantenimiento para que tome la orden y realice el checklist.</p><div class="notice-box"><b>Folio:</b> ${esc(p.folio)}<br><b>Unidad:</b> ${esc(p.unidad_asignada)}<br><b>Empresa:</b> ${esc(p.empresa||'')} · ${esc(p.op||'')}</div><div class="modal-actions"><button class="btn-green" onclick='abrirAvisoMantenimientoUnidad(${JSON.stringify(p)})'>Mandar WhatsApp a Mantenimiento</button><button class="btn-gray" onclick="byId('modalAvisoMttoUnidad').remove();render()">Cerrar</button></div></div>`; document.body.appendChild(div);}
 async function guardarAsignacionUnidad(folio){
   const unidad=val('unidadAsignadaValor') || val('unidadAsignadaSearch');
   if(!String(unidad||'').trim()) return alert('Selecciona una unidad de la lista o busca por número/descripcion.');
   try{
-    await api(`/api/unidad-prestamos/${encodeURIComponent(folio)}/asignar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidad_asignada:unidad})});
-    alert('Unidad asignada.');
+    const asignado = await api(`/api/unidad-prestamos/${encodeURIComponent(folio)}/asignar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidad_asignada:unidad})});
     const m=byId('modalAsignarUnidad'); if(m)m.remove();
-    render();
+    pantallaAvisoMantenimientoUnidad(asignado||{folio, unidad_asignada:unidad});
   }catch(e){alert(e.message)}
 }
 async function asignarUnidadPrestamo(folio){
