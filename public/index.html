@@ -13,6 +13,12 @@
 /* MEJORAS AUTORIZADAS: vista más limpia sin quitar funciones */
 .kpi b small{font-size:13px;color:#666;display:block;font-weight:700;margin-top:2px}.time-compact{font-size:18px;font-weight:900;color:#111}.time-detail{font-size:12px;color:#666;margin-top:3px}.stats-list{display:grid;gap:8px}.stat-row{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #eef1f4;padding:7px 0}.stat-row b{color:#222}.stat-row span{background:#fff7ef;border:1px solid #ffc18d;border-radius:999px;padding:3px 8px;font-weight:900;color:#b45309}.user-help{background:#f8fafc;border:1px solid var(--line);border-radius:16px;padding:12px;margin:10px 0}.hidden-for-area{opacity:.72}
 
+
+/* MODULO AUTORIZADO: préstamo de unidades */
+.fuel-wrap{background:#101010;border:4px solid #2b2b2b;border-radius:26px;padding:22px;color:#fff;text-align:center;margin:14px 0}
+.fuel-gauge{width:300px;height:220px;margin:0 auto;position:relative;background:radial-gradient(circle,#222 0%,#111 58%,#050505 61%,#000 100%);border-radius:50%;box-shadow:inset 0 0 30px #000,0 8px 26px #0006}
+.fuel-mark{position:absolute;font-weight:900;color:white;font-size:28px;text-shadow:0 2px 5px #000}.fuel-e{left:58px;bottom:62px}.fuel-q{left:72px;top:93px}.fuel-h{left:138px;top:53px}.fuel-tq{right:55px;top:93px}.fuel-f{right:64px;bottom:62px}.fuel-needle{position:absolute;width:118px;height:8px;background:#e51b24;border-radius:999px;left:150px;top:137px;transform-origin:0% 50%;transform:rotate(0deg);box-shadow:0 0 9px #000}.fuel-center{position:absolute;width:62px;height:62px;background:#444;border:8px solid #666;border-radius:50%;left:119px;top:108px}.fuel-slider{width:100%;accent-color:var(--orange);margin-top:18px}.unit-row-actions button{margin:3px}.loan-tech-row{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:16px;padding:13px;margin:8px 0}.unit-status{font-weight:900;color:var(--orange)}
+
 </style>
 </head>
 <body>
@@ -21,7 +27,7 @@
 <header id="mainHeader" style="display:none"><div class="header-logo"><img src="/logo-interbandas.png" alt="Interbandas"></div><div class="header-title"><h1>MANTENIMIENTO IBS</h1><div id="userLabel">Sistema interno</div></div><div id="topActions" class="topActions"></div></header>
 <main id="app"></main>
 <script>
-let me=null, activos=[], empleados=[], empleadosReportantes=[], tecnicos=[], gerentes=[], tickets=[], reportes=null, catalogos={sucursales:[],areas:[]}, vista='panel', selectedAsset=null, selectedReporter=null, editingUserId=null;
+let me=null, activos=[], empleados=[], empleadosReportantes=[], tecnicos=[], gerentes=[], tickets=[], unidadPrestamos=[], reportes=null, catalogos={sucursales:[],areas:[]}, vista='panel', selectedAsset=null, selectedReporter=null, editingUserId=null;
 const SUCURSALES_LOGIN_BASE=[
   'CHIHUAHUA','JUAREZ','TORREON','DURANGO','HERMOSILLO','MONTERREY','SALTILLO','CULIACAN','TIJUANA','MEXICALI','OBREGON','GUADALAJARA','MEXICO','QUERETARO','LEON','SAN LUIS POTOSI','PUEBLA','VERACRUZ','MERIDA','TAMPICO'
 ];
@@ -363,11 +369,11 @@ async function boot(){try{let r=await api('/api/me');me=r.user;if(me){resetIdleT
 async function login(){await cargarSucursalesLogin();document.getElementById('mainHeader').style.display='none';app.style.maxWidth='none';app.style.padding='0';app.innerHTML=`<section class="login-page"><div class="login-left"><div class="ibs-logo-wrap"><img src="/logo-interbandas.png" alt="Interbandas"></div><h1 class="login-title">Sistema de <strong>Mantenimiento</strong> IBS</h1><p class="login-subtitle">Control general de tickets, activos, empleados, tiempos muertos y reportes internos por sucursal.</p><div class="machine-strip"><div class="machine-card"><span class="ico">🏭</span><b>Maquinaria</b><small>Activos industriales</small></div><div class="machine-card"><span class="ico">🛠️</span><b>Herramientas</b><small>Inventario por sucursal</small></div><div class="machine-card"><span class="ico">📋</span><b>Mantenimiento</b><small>Tickets y fallas</small></div><div class="machine-card"><span class="ico">📊</span><b>Control</b><small>Tiempos y reportes</small></div></div></div><div class="login-right"><div class="login-card"><div class="system-online"><span class="dot-online"></span>Sistema conectado a Neon</div><h2>Ingresar</h2><p>Acceso interno para personal autorizado.</p><label>Usuario</label><input id="u" autocomplete="username" placeholder="Usuario"><label>Contraseña</label><input id="p" type="password" autocomplete="current-password" placeholder="Contraseña"><label>Sucursal</label><select id="loginSucursal"><option value="">Selecciona sucursal</option>${loginSucursalOptions()}</select><button class="btn-orange" onclick="doLogin()">Entrar al sistema</button><div class="login-footer">Interbandas · Mantenimiento IBS<br>Usuarios separados por sucursal</div></div></div></section>`;setTimeout(()=>document.getElementById('u').focus(),50)}
 async function doLogin(){const username=val('u').trim();const password=val('p');const sucursal=val('loginSucursal');if(!username)return alert('Escribe el usuario');if(!password)return alert('Escribe la contraseña');if(!sucursal)return alert('Selecciona la sucursal');showLoading('Iniciando sesión...');try{const r=await api('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,sucursal})});me=r.user;document.getElementById('p').value='';resetIdleTimer();render()}catch(e){alert('No entró: '+e.message)}finally{hideLoading()}}
 async function salir(){try{await api('/api/logout',{method:'POST'})}catch(e){}me=null;selectedAsset=null;login()}
-async function loadAll(){const [b,ts,rs,cat]=await Promise.all([api('/api/bootstrap'),api('/api/tickets'),api('/api/reportes'),api('/api/catalogos')]);activos=b.activos;empleados=b.empleados;empleadosReportantes=b.empleados_reportantes||[];tecnicos=b.tecnicos;gerentes=b.gerentes||[];tickets=ts;reportes=rs;catalogos=cat||{sucursales:[],areas:[]}}
+async function loadAll(){const [b,ts,ups,rs,cat]=await Promise.all([api('/api/bootstrap'),api('/api/tickets'),api('/api/unidad-prestamos'),api('/api/reportes'),api('/api/catalogos')]);activos=b.activos;empleados=b.empleados;empleadosReportantes=b.empleados_reportantes||[];tecnicos=b.tecnicos;gerentes=b.gerentes||[];tickets=ts;unidadPrestamos=ups;reportes=rs;catalogos=cat||{sucursales:[],areas:[]}}
 async function render(){if(!me)return login();showLoading('Cargando sistema...');try{document.getElementById('mainHeader').style.display='flex';document.getElementById('userLabel').textContent=`${me.name||me.username} · ${me.role||''}`;document.getElementById('topActions').innerHTML=`<button class="btn-gray" onclick="render()">Actualizar</button>${canExport()?`<button class="btn-dark" onclick="location.href='/api/export/excel'">Exportar Excel</button>`:''}<button class="btn-red" onclick="salir()">Salir</button>`;app.style.maxWidth='1350px';app.style.padding='18px';await loadAll();if(!isAdmin() && (vista==='empleados' || vista==='usuarios')) vista='panel';
-app.innerHTML=`${hero()}${me.must_change_password?changePassCard():''}${tabs()}${vista==='panel'?panel():vista==='tickets'?ticketsView():vista==='activos'?activosView():vista==='empleados'?empleadosView():vista==='reportes'?reportesView():usuariosView()}`;}finally{hideLoading()}}
+app.innerHTML=`${hero()}${me.must_change_password?changePassCard():''}${tabs()}${vista==='panel'?panel():vista==='tickets'?ticketsView():vista==='unidad_prestamos'?unidadPrestamosView():vista==='activos'?activosView():vista==='empleados'?empleadosView():vista==='reportes'?reportesView():usuariosView()}`;}finally{hideLoading()}}
 function hero(){return `<section class="hero"><h2>Panel de mantenimiento industrial</h2><p>Sucursal: <b>${esc(me.sucursal||'Todas')}</b> · Área: <b>${esc(me.area_asignada||'Todas')}</b> · Usuarios por área, empleados solo como reportantes y apoyo matriz Chihuahua.</p></section>`}
-function tabs(){return `<div class="tabs"><button class="tab ${vista==='panel'?'active':''}" onclick="vista='panel';render()">Panel</button><button class="tab ${vista==='tickets'?'active':''}" onclick="vista='tickets';render()">Tickets</button><button class="tab ${vista==='activos'?'active':''}" onclick="vista='activos';render()">Activos</button>${isAdmin()?`<button class="tab ${vista==='empleados'?'active':''}" onclick="vista='empleados';render()">Empleados</button><button class="tab ${vista==='usuarios'?'active':''}" onclick="vista='usuarios';render()">Usuarios</button>`:''}<button class="tab ${vista==='reportes'?'active':''}" onclick="vista='reportes';render()">Reportes</button></div>`}
+function tabs(){return `<div class="tabs"><button class="tab ${vista==='panel'?'active':''}" onclick="vista='panel';render()">Panel</button><button class="tab ${vista==='tickets'?'active':''}" onclick="vista='tickets';render()">Tickets</button><button class="tab ${vista==='unidad_prestamos'?'active':''}" onclick="vista='unidad_prestamos';render()">Préstamo de unidades</button><button class="tab ${vista==='activos'?'active':''}" onclick="vista='activos';render()">Activos</button>${isAdmin()?`<button class="tab ${vista==='empleados'?'active':''}" onclick="vista='empleados';render()">Empleados</button><button class="tab ${vista==='usuarios'?'active':''}" onclick="vista='usuarios';render()">Usuarios</button>`:''}<button class="tab ${vista==='reportes'?'active':''}" onclick="vista='reportes';render()">Reportes</button></div>`}
 function changePassCard(){return `<div class="card" style="border:2px solid var(--orange)">
   <h2>Cambio de contraseña requerido</h2>
   <p class="muted">Escribe tu contraseña actual y una nueva contraseña de mínimo 6 caracteres.</p>
@@ -654,6 +660,101 @@ async function eliminarUsuario(id){if(!confirm('¿Eliminar este usuario definiti
 function reportesView(){let max=Math.max(reportes.mttoMin,reportes.produccionMin,1);return `${kpis()}<div class="card"><h2>Dashboard gerente y tiempos muertos</h2><p class="muted">Vista compacta: el sistema muestra horas/minutos para leer rápido, pero conserva los minutos exactos para control y Excel.</p><p><b>Tiempo muerto total:</b> <span class="time-compact">${fmtMin(reportes.muertoTotalMin||0)}</span> <span class="muted">(${fmtMinDetalle(reportes.muertoTotalMin||0)})</span></p><div class="grid"><div class="time-box-mtto"><b>Tiempo MTTO</b><br><span class="time-compact">${fmtMin(reportes.mttoMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.mttoMin||0)}</div><div class="bar"><span style="width:${(reportes.mttoMin/max)*100}%"></span></div></div><div class="time-box-prod"><b>Tiempo Operaciones</b><br><span class="time-compact">${fmtMin(reportes.produccionMin||0)}</span><div class="time-detail">${fmtMinDetalle(reportes.produccionMin||0)}</div><div class="bar"><span style="width:${(reportes.produccionMin/max)*100}%"></span></div></div></div><br><button class="btn-dark" onclick="location.href='/api/export/excel'">Descargar reporte Excel</button></div><div class="grid">${simpleStats('Por estado',reportes.porEstado)}${simpleStats('Por sucursal',reportes.porSucursal)}${simpleStats('Por área',reportes.porArea)}${simpleStats('Por tipo de falla',reportes.porTipoFalla)}${simpleStats('Máquinas con más tickets',reportes.porActivo)}${simpleStats('Por técnico',reportes.porTecnico)}</div>${tablaTickets(ticketsVisibles())}`}
 function simpleStats(title,obj){const rows=topEntries(obj,8);return `<div class="card"><h2>${title}</h2><div class="stats-list">${rows.map(([k,v])=>`<div class="stat-row"><b>${esc(k)}</b><span>${v}</span></div>`).join('')||'<p class="muted">Sin datos</p>'}</div></div>`}
 
+
+// ================= MODULO AUTORIZADO: PRESTAMO DE UNIDADES =================
+function puedeGestionarUnidades(){return me && ['admin','gerente','mantenimiento'].includes(String(me.role||'').toLowerCase())}
+function empleadoLabel(e){return `${e.numero_empleado||''} · ${e.nombre||e.name||''} · ${e.area||e.area_asignada||''}`}
+function empleadosParaUnidad(){return (empleadosReportantes||[]).filter(e=>!me.sucursal || sameLoose(e.sucursal||'', me.sucursal||''))}
+function buscarEmpleadoUnidad(q){
+  q=normalizeKey(q||'');
+  const box=byId('unidadEmpleadoResults');
+  if(!box) return;
+  if(!q){box.innerHTML='';return;}
+  const rows=empleadosParaUnidad().filter(e=>normalizeKey(`${e.numero_empleado||''} ${e.nombre||e.name||''} ${e.area||''}`).includes(q)).slice(0,12);
+  box.innerHTML=`<div class="asset-results">${rows.map(e=>`<div class="asset-option" onclick='seleccionarEmpleadoUnidad(${JSON.stringify(e)})'><b>${esc(e.numero_empleado||'')}</b> ${esc(e.nombre||e.name||'')}<br><span class="muted">${esc(e.area||'')} · ${esc(e.sucursal||'')}</span></div>`).join('')||'<div class="asset-option">Sin coincidencias</div>'}</div>`;
+}
+function seleccionarEmpleadoUnidad(e){
+  byId('unidadEmpleadoId').value=e.id||'';
+  byId('unidadEmpleadoNombre').value=e.nombre||e.name||'';
+  byId('unidadEmpleadoNumero').value=e.numero_empleado||'';
+  byId('unidadEmpleadoSearch').value=empleadoLabel(e);
+  byId('unidadEmpleadoResults').innerHTML='';
+}
+function fuelAngle(pct){return -150 + (Number(pct||0)*300/100)}
+function updateFuelGauge(prefix='entrega'){
+  const pct=Number(val(prefix+'Combustible')||0);
+  const needle=byId(prefix+'Needle'); const label=byId(prefix+'FuelLabel');
+  if(needle) needle.style.transform=`rotate(${fuelAngle(pct)}deg)`;
+  if(label) label.textContent=pct+'%';
+}
+function fuelGauge(prefix='entrega', value=50){
+  setTimeout(()=>updateFuelGauge(prefix),50);
+  return `<div class="fuel-wrap"><h3>Nivel de combustible</h3><div class="fuel-gauge"><div class="fuel-mark fuel-e">E</div><div class="fuel-mark fuel-q">1/4</div><div class="fuel-mark fuel-h">1/2</div><div class="fuel-mark fuel-tq">3/4</div><div class="fuel-mark fuel-f">F</div><div id="${prefix}Needle" class="fuel-needle"></div><div class="fuel-center"></div></div><input class="fuel-slider" id="${prefix}Combustible" type="range" min="0" max="100" step="25" value="${value}" oninput="updateFuelGauge('${prefix}')"><h2 id="${prefix}FuelLabel">${value}%</h2><div class="muted" style="color:white">E=0% · 1/4=25% · 1/2=50% · 3/4=75% · F=100%</div></div>`
+}
+function unidadPrestamosView(){
+  const admin=puedeGestionarUnidades();
+  const rows=unidadPrestamos||[];
+  return `<div class="card"><h2>Préstamo de unidades</h2><p class="muted">El área/técnico crea la solicitud. Mantenimiento asigna la unidad y llena checklist obligatorio.</p>${!admin?solicitudUnidadCard():solicitudesMttoPanel(rows)}</div><div class="card"><h2>${admin?'Solicitudes / control de unidades':'Mis solicitudes de préstamo'}</h2>${tablaPrestamosUnidad(rows,admin)}</div>`;
+}
+function solicitudUnidadCard(){
+  return `<div class="notice-box"><b>Regla:</b> el solicitante no asigna unidad. Mantenimiento revisa disponibilidad y asigna la unidad.</div><div class="grid3"><div><label>Tipo de salida</label><select id="u_tipo_salida"><option>Servicio con técnicos</option><option>Entrega de material/bandas</option><option>Préstamo personal</option></select></div><div><label>Empresa que se visita</label><input id="u_empresa" placeholder="Empresa"></div><div><label>OP / referencia</label><input id="u_op" placeholder="OP o folio"></div></div><div class="grid"><div><label>Técnico/usuario recibe</label><input id="unidadEmpleadoSearch" oninput="buscarEmpleadoUnidad(this.value)" placeholder="Número de empleado o nombre"><input type="hidden" id="unidadEmpleadoId"><input type="hidden" id="unidadEmpleadoNombre"><input type="hidden" id="unidadEmpleadoNumero"><div id="unidadEmpleadoResults"></div></div><div><label>Cantidad técnicos</label><input id="u_cantidad_tecnicos" type="number" min="1" value="1"></div></div><div class="grid"><div><label>Foto de OP</label><input id="u_foto_op" type="file" accept="image/*"><div class="muted">El técnico solo toma foto de la OP.</div></div><div><label>Número/folio de licencia</label><input id="u_licencia_numero" placeholder="Número de licencia obligatorio"><label>Foto de licencia</label><input id="u_foto_licencia" type="file" accept="image/*"></div></div><label>¿Lleva remolque?</label><select id="u_lleva_remolque" onchange="byId('u_remolque_box').style.display=this.value==='SI'?'block':'none'"><option value="NO">No</option><option value="SI">Sí</option></select><div id="u_remolque_box" style="display:none"><label>Datos del remolque</label><textarea id="u_datos_remolque" placeholder="Eco, placas, descripción"></textarea></div><button class="btn-orange" onclick="crearSolicitudUnidad()">Crear solicitud de préstamo</button>`;
+}
+function solicitudesMttoPanel(rows){
+  const pendientes=(rows||[]).filter(x=>['SOLICITADO','ASIGNADO','ENTREGADO','EN_SERVICIO'].includes(String(x.estado||'')));
+  return `<div class="notice-box"><b>Mantenimiento:</b> asigna unidad, llena checklist entrega/recepción, fotos, firmas y percances.</div><p><b>${pendientes.length}</b> solicitudes activas.</p>`;
+}
+function tablaPrestamosUnidad(rows,admin){
+  if(!rows.length)return `<div class="empty">Sin solicitudes de préstamo.</div>`;
+  return `<table><thead><tr><th>Folio</th><th>Empresa / OP</th><th>Usuario/Técnico</th><th>Estado</th><th>Unidad asignada</th><th>Acciones</th></tr></thead><tbody>${rows.map(p=>`<tr><td><b>${esc(p.folio)}</b><br>${fmt(p.creado)}</td><td>${esc(p.empresa||'')}<br><span class="muted">${esc(p.op||'')}</span></td><td>${esc(p.tecnico_nombre||'')}<br><span class="muted">${esc(p.tecnico_numero||'')}</span></td><td><span class="status ${sc(p.estado)}">${esc(p.estado)}</span></td><td><b>${esc(p.unidad_asignada||'Pendiente Mtto')}</b></td><td class="unit-row-actions">${admin?accionesPrestamoUnidad(p):'<span class="muted">Seguimiento de solicitud</span>'}</td></tr>`).join('')}</tbody></table>`;
+}
+function accionesPrestamoUnidad(p){
+  return `<button class="btn-blue" onclick="asignarUnidadPrestamo('${p.folio}')">Asignar unidad</button><button class="btn-blue" onclick="abrirChecklistUnidad('${p.folio}','ENTREGA')">Checklist entrega</button><button class="btn-green" onclick="abrirChecklistUnidad('${p.folio}','RECEPCION')">Checklist recepción</button><button class="btn-red" onclick="abrirPercanceUnidad('${p.folio}')">Percance/daño</button>`;
+}
+async function crearSolicitudUnidad(){
+  if(!val('unidadEmpleadoNombre')) return alert('Selecciona el técnico/usuario desde la base de empleados.');
+  if(!val('u_empresa')) return alert('Captura empresa.');
+  if(!val('u_licencia_numero') && !filesOf('u_foto_licencia').length) return alert('Captura número de licencia o anexa foto de licencia.');
+  const body={tipo_salida:val('u_tipo_salida'),empresa:val('u_empresa'),op:val('u_op'),tecnico_id:val('unidadEmpleadoId'),tecnico_nombre:val('unidadEmpleadoNombre'),tecnico_numero:val('unidadEmpleadoNumero'),cantidad_tecnicos:val('u_cantidad_tecnicos'),licencia_numero:val('u_licencia_numero'),lleva_remolque:val('u_lleva_remolque'),datos_remolque:val('u_datos_remolque')};
+  try{showLoading('Creando solicitud...');await api('/api/unidad-prestamos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});alert('Solicitud creada. Mantenimiento asignará unidad.');await render();}catch(e){alert(e.message)}finally{hideLoading()}
+}
+async function asignarUnidadPrestamo(folio){
+  const unidad=prompt('Unidad asignada por Mantenimiento (eco / placas / descripción)');
+  if(!unidad)return;
+  try{await api(`/api/unidad-prestamos/${encodeURIComponent(folio)}/asignar`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unidad_asignada:unidad})});alert('Unidad asignada.');render();}catch(e){alert(e.message)}
+}
+function checklistItem(nombre,key){return `<div class="card" style="box-shadow:none"><h3>${nombre}</h3><label>Aplicabilidad</label><select id="${key}_aplica"><option value="SI">Sí aplica</option><option value="NO">No aplica</option></select><label><input type="checkbox" id="${key}_ok" style="width:auto"> Revisado / OK</label><label>Observaciones</label><input id="${key}_obs" placeholder="Observaciones"></div>`}
+function abrirChecklistUnidad(folio,tipo){
+  const div=document.createElement('div');div.className='modal-backdrop';div.id='modalChecklistUnidad';
+  const prefix=tipo==='ENTREGA'?'entrega':'recepcion';
+  div.innerHTML=`<div class="modal-card" style="max-width:1100px;max-height:92vh;overflow:auto"><h2>Checklist de ${tipo==='ENTREGA'?'entrega':'recepción'} · ${esc(folio)}</h2><p class="muted">Cada punto que Sí aplica debe quedar revisado. Firmas obligatorias.</p><div class="grid3"><div><label>KM ${tipo==='ENTREGA'?'inicial':'final'}</label><input id="chk_km" type="number"></div><div><label>Fecha/hora</label><input id="chk_fecha" value="${new Date().toLocaleString()}"></div><div><label>Observaciones generales</label><input id="chk_obs" placeholder="Observaciones"></div></div>${fuelGauge(prefix,50)}<h2>Checklist obligatorio</h2><div class="grid4">${checklistItem('Luces','luces')}${checklistItem('Intermitentes','intermitentes')}${checklistItem('Llanta extra','llanta_extra')}${checklistItem('Póliza de seguro','poliza')}${checklistItem('Nivel de agua','agua')}${checklistItem('Nivel de aceite','aceite')}${checklistItem('Líquido de frenos','frenos')}${checklistItem('Limpiaparabrisas','limpia')}${checklistItem('Condición interior','interior')}${checklistItem('Alarma de reversa','alarma')}${checklistItem('Torreta','torreta')}${checklistItem('Tacón','tacon')}${checklistItem('Cono de seguridad','cono')}${checklistItem('Pértiga','pertiga')}</div><div class="grid"><div><label>Número de póliza</label><input id="poliza_numero"></div><div><label>Vigencia póliza</label><input id="poliza_vigencia" type="date"></div></div><label>Fotos múltiples de ${tipo==='ENTREGA'?'entrega':'recepción'} / daños</label><input id="chk_fotos" type="file" multiple accept="image/*"><div class="grid"><div><label>Firma técnico/usuario</label><button class="btn-orange" onclick="marcarFirma('firma_tecnico')">Firmar / Procesar</button><input id="firma_tecnico" placeholder="Firma procesada" readonly></div><div><label>Firma mantenimiento</label><button class="btn-orange" onclick="marcarFirma('firma_mtto')">Firmar / Procesar</button><input id="firma_mtto" placeholder="Firma procesada" readonly></div></div><div class="modal-actions"><button class="btn-green" onclick="guardarChecklistUnidad('${folio}','${tipo}')">Guardar checklist</button><button class="btn-gray" onclick="byId('modalChecklistUnidad').remove()">Cerrar</button></div></div>`;
+  document.body.appendChild(div);updateFuelGauge(prefix);
+}
+function marcarFirma(id){byId(id).value=(me.name||me.username)+' · '+new Date().toLocaleString()}
+function leerChecklistPayload(prefix){
+  const keys=['luces','intermitentes','llanta_extra','poliza','agua','aceite','frenos','limpia','interior','alarma','torreta','tacon','cono','pertiga'];
+  const items={};
+  for(const k of keys){items[k]={aplica:val(k+'_aplica'),ok:byId(k+'_ok')?.checked||false,obs:val(k+'_obs')}}
+  return {km:val('chk_km'),fecha:val('chk_fecha'),observaciones:val('chk_obs'),combustible:Number(val(prefix+'Combustible')||0),items,poliza_numero:val('poliza_numero'),poliza_vigencia:val('poliza_vigencia'),firma_tecnico:val('firma_tecnico'),firma_mtto:val('firma_mtto')}
+}
+async function guardarChecklistUnidad(folio,tipo){
+  const prefix=tipo==='ENTREGA'?'entrega':'recepcion'; const payload=leerChecklistPayload(prefix);
+  if(!payload.km)return alert('KM obligatorio.');
+  if(payload.items.poliza.aplica==='SI' && (!payload.poliza_numero || !payload.poliza_vigencia))return alert('Póliza obligatoria: número y vigencia.');
+  for(const [k,it] of Object.entries(payload.items)){if(it.aplica==='SI' && !it.ok)return alert('Falta revisar: '+k)}
+  if(!payload.firma_tecnico || !payload.firma_mtto)return alert('Firmas obligatorias.');
+  try{await api(`/api/unidad-prestamos/${encodeURIComponent(folio)}/checklist`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipo,...payload})});alert('Checklist guardado.');byId('modalChecklistUnidad').remove();render();}catch(e){alert(e.message)}
+}
+function abrirPercanceUnidad(folio){
+  const div=document.createElement('div');div.className='modal-backdrop';div.id='modalPercanceUnidad';
+  div.innerHTML=`<div class="modal-card"><h2>Reporte de percance / daño · ${esc(folio)}</h2><label>Descripción de hechos</label><textarea id="per_hechos"></textarea><label>Daños detectados</label><textarea id="per_danos"></textarea><label>Acciones tomadas / recomendadas</label><textarea id="per_acciones"></textarea><label>Fotos/evidencias</label><input id="per_fotos" type="file" multiple accept="image/*"><div class="grid"><div><label>Firma técnico/usuario</label><button class="btn-orange" onclick="marcarFirma('per_firma_tecnico')">Firmar</button><input id="per_firma_tecnico" readonly></div><div><label>Firma mantenimiento</label><button class="btn-orange" onclick="marcarFirma('per_firma_mtto')">Firmar</button><input id="per_firma_mtto" readonly></div></div><div class="modal-actions"><button class="btn-red" onclick="guardarPercanceUnidad('${folio}')">Guardar reporte / PDF futuro</button><button class="btn-gray" onclick="byId('modalPercanceUnidad').remove()">Cerrar</button></div></div>`;
+  document.body.appendChild(div);
+}
+async function guardarPercanceUnidad(folio){
+  if(!val('per_hechos'))return alert('Descripción de hechos obligatoria.');
+  if(!val('per_firma_tecnico') || !val('per_firma_mtto'))return alert('Firmas obligatorias.');
+  try{await api(`/api/unidad-prestamos/${encodeURIComponent(folio)}/percance`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hechos:val('per_hechos'),danos:val('per_danos'),acciones:val('per_acciones'),firma_tecnico:val('per_firma_tecnico'),firma_mtto:val('per_firma_mtto')})});alert('Reporte guardado.');byId('modalPercanceUnidad').remove();render();}catch(e){alert(e.message)}
+}
+
 window.changePass=changePass;
 window.crearTicket=crearTicket;
 window.asignar=asignar;
@@ -688,6 +789,17 @@ window.abrirConfirmacionUsuario=abrirConfirmacionUsuario;
 window.cerrarModalAsignacion=cerrarModalAsignacion;
 window.abrirAvisoGerente=abrirAvisoGerente;
 window.cerrarModalGerente=cerrarModalGerente;
+
+window.buscarEmpleadoUnidad=buscarEmpleadoUnidad;
+window.seleccionarEmpleadoUnidad=seleccionarEmpleadoUnidad;
+window.updateFuelGauge=updateFuelGauge;
+window.crearSolicitudUnidad=crearSolicitudUnidad;
+window.asignarUnidadPrestamo=asignarUnidadPrestamo;
+window.abrirChecklistUnidad=abrirChecklistUnidad;
+window.marcarFirma=marcarFirma;
+window.guardarChecklistUnidad=guardarChecklistUnidad;
+window.abrirPercanceUnidad=abrirPercanceUnidad;
+window.guardarPercanceUnidad=guardarPercanceUnidad;
 
 window.addEventListener('error',e=>{console.error(e.error||e.message);});
 boot();
