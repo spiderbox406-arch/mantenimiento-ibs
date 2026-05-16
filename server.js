@@ -1703,6 +1703,36 @@ function uploadedPaths(files, field){
   const arr = files && files[field] ? files[field] : [];
   return arr.map(f => '/uploads/' + path.basename(f.filename));
 }
+function safeFolderName(v){
+  return clean(v || 'SIN_UNIDAD').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]/g,'_').replace(/_+/g,'_').slice(0,80) || 'SIN_UNIDAD';
+}
+function fechaCarpeta(d = new Date()){
+  const y=d.getFullYear();
+  const m=String(d.getMonth()+1).padStart(2,'0');
+  const day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+function moveUploadedFilesToUnitFolder(files, field, loan, tipo){
+  const arr = files && files[field] ? files[field] : [];
+  const unidad = safeFolderName(loan.unidad_asignada || loan.activo || loan.folio || 'SIN_UNIDAD');
+  const tipoFolder = safeFolderName(String(tipo || 'CHECKLIST').toLowerCase());
+  const folderDate = `${tipoFolder}_${fechaCarpeta()}`;
+  const folder = path.join(uploadDir, unidad, folderDate);
+  fs.mkdirSync(folder, { recursive: true });
+  return arr.map((f, idx) => {
+    const ext = path.extname(f.originalname || f.filename || '').toLowerCase() || path.extname(f.filename || '') || '.jpg';
+    const originalBase = path.basename(f.originalname || f.filename || `foto_${idx+1}${ext}`, ext).replace(/[^a-zA-Z0-9_.-]/g,'_').slice(0,45) || `foto_${idx+1}`;
+    const filename = `${Date.now()}_${String(idx+1).padStart(2,'0')}_${originalBase}${ext}`;
+    const dest = path.join(folder, filename);
+    try{
+      fs.renameSync(f.path, dest);
+    }catch(e){
+      fs.copyFileSync(f.path, dest);
+      try{ fs.unlinkSync(f.path); }catch(_e){}
+    }
+    return `/uploads/${unidad}/${folderDate}/${filename}`;
+  });
+}
 function firmaImg(v){
   const s = clean(v);
   if(s.startsWith('data:image/')) return `<img src="${s}" style="max-width:240px;max-height:95px;border:1px solid #ddd;border-radius:8px">`;
@@ -1740,10 +1770,16 @@ app.post('/api/unidad-prestamos', requireLogin, uploadImages.fields([{name:'foto
   if(!clean(b.empresa)) return res.status(400).json({error:'Empresa obligatoria.'});
   if(!clean(b.tecnico_nombre)) return res.status(400).json({error:'Selecciona técnico/usuario desde empleados.'});
   if(!clean(b.licencia_numero) && !licenciaFotos.length) return res.status(400).json({error:'Captura número de licencia o anexa foto de licencia.'});
+
+  // Mejora autorizada: la vigencia de licencia es obligatoria y se valida también en servidor.
+  // Si la fecha ya venció, no permite crear el préstamo aunque intenten brincarse la validación del navegador.
+  const licenciaValidada = estadoLicenciaServer(b.licencia_vigencia);
+  if(!licenciaValidada.ok) return res.status(400).json({error:licenciaValidada.mensaje});
+
   const folio='UNI-'+Date.now();
   const datos = {foto_licencia: licenciaFotos[0] || '', nota:'La unidad se asigna únicamente por Gerente/Supervisor de Operaciones. Mantenimiento hace checklist.'};
-  const r=await pool.query(`insert into unidad_prestamos(folio,tipo_salida,empresa,op,tecnico_id,tecnico_nombre,tecnico_numero,cantidad_tecnicos,licencia_numero,lleva_remolque,datos_remolque,sucursal,area,created_by)
-    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`, [folio,clean(b.tipo_salida),clean(b.empresa),clean(b.op),clean(b.tecnico_id),clean(b.tecnico_nombre),clean(b.tecnico_numero),Number(b.cantidad_tecnicos||1),clean(b.licencia_numero),clean(b.lleva_remolque)||'NO',clean(b.datos_remolque) + (datos.foto_licencia ? `\nFoto licencia: ${datos.foto_licencia}` : ''),canonicalSucursal(user.sucursal||''),canonicalArea(user.area_asignada||''),user.id]);
+  const r=await pool.query(`insert into unidad_prestamos(folio,tipo_salida,empresa,op,tecnico_id,tecnico_nombre,tecnico_numero,cantidad_tecnicos,licencia_numero,licencia_vigencia,licencia_estado,lleva_remolque,datos_remolque,sucursal,area,created_by)
+    values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *`, [folio,clean(b.tipo_salida),clean(b.empresa),clean(b.op),clean(b.tecnico_id),clean(b.tecnico_nombre),clean(b.tecnico_numero),Number(b.cantidad_tecnicos||1),clean(b.licencia_numero),clean(b.licencia_vigencia),licenciaValidada.estado,clean(b.lleva_remolque)||'NO',clean(b.datos_remolque) + (datos.foto_licencia ? `\nFoto licencia: ${datos.foto_licencia}` : ''),canonicalSucursal(user.sucursal||''),canonicalArea(user.area_asignada||''),user.id]);
   await logAction(user.id,'crear_prestamo_unidad',{folio, foto_licencia:datos.foto_licencia});
   res.json(r.rows[0]);
 });
@@ -1810,8 +1846,8 @@ app.post('/api/unidad-prestamos/:folio/checklist', requireLogin, uploadImages.fi
   if(tipo === 'RECEPCION' && !['UNIDAD PRESTADA','ENTREGADA','EN_SERVICIO','EN RECEPCION'].includes(String(loan.rows[0].estado||''))) return res.status(400).json({error:'La unidad todavía no está prestada para poder recibirla.'});
   const err=validarChecklistUnidad(b); if(err) return res.status(400).json({error:err});
   let items={}; try{ items=typeof b.items==='string'?JSON.parse(b.items):(b.items||{}); }catch(e){ items={}; }
-  const fotos = uploadedPaths(req.files, 'fotos');
-  const datos = {...b, items, fotos};
+  const fotos = moveUploadedFilesToUnitFolder(req.files, 'fotos', loan.rows[0], tipo);
+  const datos = {...b, items, fotos, carpeta_fotos: fotos[0] ? path.dirname(fotos[0]) : ''};
   const r=await pool.query(`insert into unidad_prestamo_checklists(folio,tipo,km,combustible,datos,creado_por) values($1,$2,$3,$4,$5,$6) returning *`, [folio,tipo,clean(b.km),Number(b.combustible||0),JSON.stringify(datos),req.session.user.id]);
   const estado=tipo==='RECEPCION'?'CERRADA':'UNIDAD PRESTADA';
   if(tipo==='RECEPCION') {
@@ -1835,6 +1871,12 @@ app.post('/api/unidad-prestamos/:folio/percance', requireLogin, uploadImages.fie
 });
 function fuelPdfLabel(pct){ pct=Number(pct||0); if(pct<=0)return 'Empty / 0%'; if(pct>=100)return 'Full / 100%'; return pct+'%'; }
 function fuelGaugePdf(pct){ pct=Math.max(0,Math.min(100,Number(pct||0))); const deg=(180 - pct*180/100) * Math.PI/180; const cx=160, cy=150, r=105; const x=cx+r*Math.cos(deg); const y=cy-r*Math.sin(deg); return `<div class="pdf-fuel"><svg viewBox="0 0 320 190" width="320" height="190"><path d="M55 150 A105 105 0 0 1 265 150" fill="none" stroke="#111" stroke-width="14"/><text x="42" y="162" font-size="20" font-weight="700">E</text><text x="72" y="82" font-size="18" font-weight="700">1/4</text><text x="142" y="45" font-size="18" font-weight="700">1/2</text><text x="218" y="82" font-size="18" font-weight="700">3/4</text><text x="270" y="162" font-size="20" font-weight="700">F</text><line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#e51b24" stroke-width="7" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="18" fill="#555" stroke="#222" stroke-width="5"/></svg><h3>Nivel de combustible: ${fuelPdfLabel(pct)}</h3></div>`; }
+const CHECKLIST_LABELS_UNIDAD = {
+  luces:'Luces', intermitentes:'Intermitentes', llanta_extra:'Llanta extra', documentos:'Documentos', poliza:'Póliza de seguro', agua:'Nivel de agua', aceite:'Nivel de aceite', frenos:'Líquido de frenos', limpia:'Limpiaparabrisas', interior:'Condición interior', alarma:'Alarma de reversa', torreta:'Torreta', tacon:'Tacón', cono:'Cono de seguridad', pertiga:'Pértiga', extintor:'Extintor', botiquin:'Botiquín', triangulos:'Triángulos / reflejantes', gato_herramienta:'Gato y herramienta', llantas:'Estado de llantas', cinturones:'Cinturones de seguridad', claxon:'Claxon', espejos:'Espejos', placas:'Placas visibles', fugas:'Fugas visibles'
+};
+function checklistLabel(k){ return CHECKLIST_LABELS_UNIDAD[k] || String(k || '').replace(/_/g,' ').toUpperCase(); }
+function licenciaClass(estado){ const e=norm(estado); if(e.includes('VENCIDA')) return 'bad'; if(e.includes('PROXIMA')) return 'warn'; if(e.includes('VIGENTE')) return 'ok'; return ''; }
+function normalizeJsonb(v){ if(!v) return {}; if(typeof v === 'object') return v; try{return JSON.parse(v);}catch(e){return {};} }
 app.get('/api/unidad-prestamos/:folio/reporte', requireLogin, async (req,res)=>{
   const folio=req.params.folio;
   const p=await pool.query('select * from unidad_prestamos where folio=$1', [folio]);
@@ -1843,15 +1885,24 @@ app.get('/api/unidad-prestamos/:folio/reporte', requireLogin, async (req,res)=>{
   if(!canManageUnitLoans(req.session.user) && String(loan.created_by)!==String(req.session.user.id)) return res.status(403).send('Sin permiso');
   const ch=await pool.query('select * from unidad_prestamo_checklists where folio=$1 order by creado', [folio]);
   const pe=await pool.query('select * from unidad_prestamo_percances where folio=$1 order by creado', [folio]);
-  const renderFotos=(datos)=> (datos.fotos||[]).map(src=>`<img src="${escHtml(src)}">`).join('');
-  const renderChecklist=(c)=>{
-    const d=c.datos||{}; const items=d.items||{};
-    return `<section><h2>Checklist ${escHtml(c.tipo)} · ${new Date(c.creado).toLocaleString('es-MX')}</h2><div class="grid"><p><b>KM:</b> ${escHtml(c.km)}</p><div>${fuelGaugePdf(c.combustible)}</div><p><b>Póliza:</b> ${escHtml(d.poliza_numero||'')} ${escHtml(d.poliza_vigencia||'')}</p><p><b>Obs:</b> ${escHtml(d.observaciones||'')}</p></div><table><tr><th>Punto</th><th>Aplica</th><th>OK</th><th>Obs</th></tr>${Object.entries(items).map(([k,it])=>`<tr><td>${escHtml(k)}</td><td>${escHtml(it.aplica)}</td><td>${it.ok?'SI':'NO'}</td><td>${escHtml(it.obs||'')}</td></tr>`).join('')}</table><h3>Firmas</h3><div class="grid"><div><b>Técnico/usuario</b><br>${firmaImg(d.firma_tecnico)}</div><div><b>Mantenimiento</b><br>${firmaImg(d.firma_mtto)}</div></div><div class="photos">${renderFotos(d)}</div></section>`;
+  const renderFotos=(datos)=> {
+    const fotos = Array.isArray(datos.fotos) ? datos.fotos : [];
+    if(!fotos.length) return '<div class="empty-photos">Sin fotografías anexadas en este apartado.</div>';
+    return fotos.map((src,idx)=>`<figure><img src="${escHtml(src)}"><figcaption>Foto ${idx+1}<br><small>${escHtml(src)}</small></figcaption></figure>`).join('');
   };
-  const renderPercance=(x)=>{ const d=x.datos||{}; return `<section><h2>Reporte de percance / daño · ${new Date(x.creado).toLocaleString('es-MX')}</h2><p><b>Hechos:</b><br>${escHtml(x.hechos)}</p><p><b>Daños:</b><br>${escHtml(x.danos)}</p><p><b>Acciones:</b><br>${escHtml(x.acciones)}</p><div class="grid"><div><b>Firma técnico/usuario</b><br>${firmaImg(d.firma_tecnico)}</div><div><b>Firma mantenimiento</b><br>${firmaImg(d.firma_mtto)}</div></div><div class="photos">${renderFotos(d)}</div></section>`; };
+  const renderChecklist=(c)=>{
+    const d=normalizeJsonb(c.datos); const items=d.items||{};
+    const carpeta = d.carpeta_fotos ? `<p class="muted"><b>Carpeta de evidencia:</b> ${escHtml(d.carpeta_fotos)}</p>` : '';
+    return `<section class="report-section"><div class="section-title"><h2>Checklist ${escHtml(c.tipo)} </h2><span>${new Date(c.creado).toLocaleString('es-MX')}</span></div>${carpeta}<div class="grid"><div class="box"><b>KM:</b><br>${escHtml(c.km)}</div><div class="box"><b>Fecha capturada:</b><br>${escHtml(d.fecha || new Date(c.creado).toLocaleString('es-MX'))}</div><div class="box"><b>Póliza:</b><br>${escHtml(d.poliza_numero||'No capturada')}<br><small>Vigencia: ${escHtml(d.poliza_vigencia||'')}</small></div><div class="box"><b>Observaciones:</b><br>${escHtml(d.observaciones||'Sin observaciones')}</div></div>${fuelGaugePdf(c.combustible)}<table><thead><tr><th>Punto revisado</th><th>Aplica</th><th>OK</th><th>Observaciones</th></tr></thead><tbody>${Object.entries(items).map(([k,it])=>`<tr><td>${escHtml(checklistLabel(k))}</td><td>${escHtml(it.aplica)}</td><td>${it.ok?'SI':'NO'}</td><td>${escHtml(it.obs||'')}</td></tr>`).join('')}</tbody></table><h3>Firmas</h3><div class="grid signatures"><div><b>Técnico/usuario</b><br>${firmaImg(d.firma_tecnico)}</div><div><b>Mantenimiento</b><br>${firmaImg(d.firma_mtto)}</div></div><h3>Evidencia fotográfica ${escHtml(c.tipo)}</h3><div class="photos">${renderFotos(d)}</div></section>`;
+  };
+  const renderPercance=(x)=>{ const d=normalizeJsonb(x.datos); return `<section class="report-section danger"><div class="section-title"><h2>Reporte de percance / daño</h2><span>${new Date(x.creado).toLocaleString('es-MX')}</span></div><p><b>Hechos:</b><br>${escHtml(x.hechos)}</p><p><b>Daños:</b><br>${escHtml(x.danos)}</p><p><b>Acciones tomadas / recomendadas:</b><br>${escHtml(x.acciones)}</p><div class="grid signatures"><div><b>Firma técnico/usuario</b><br>${firmaImg(d.firma_tecnico)}</div><div><b>Firma mantenimiento</b><br>${firmaImg(d.firma_mtto)}</div></div><h3>Evidencia fotográfica del percance</h3><div class="photos">${renderFotos(d)}</div></section>`; };
+  const licenciaEstado = loan.licencia_estado || '';
   res.setHeader('Content-Type','text/html; charset=utf-8');
-  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte ${escHtml(folio)}</title><style>body{font-family:Arial;margin:28px;color:#222}h1{border-bottom:4px solid #ff6a00;padding-bottom:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #ccc;padding:7px;text-align:left}.photos img{max-width:180px;max-height:140px;margin:6px;border:1px solid #ccc;border-radius:8px}.pdf-fuel{border:1px solid #ccc;border-radius:12px;padding:8px;text-align:center;max-width:350px}.pdf-fuel h3{margin:0 0 6px;color:#111}section{page-break-inside:avoid;border-top:2px solid #eee;margin-top:18px;padding-top:12px}.btn{background:#ff6a00;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><button class="btn no-print" onclick="window.print()">Imprimir / Guardar como PDF</button> <button class="btn no-print" onclick="const c=prompt('Correo destino:'); if(c){location.href='mailto:'+encodeURIComponent(c)+'?subject='+encodeURIComponent('Reporte préstamo de unidad ${escHtml(folio)}')+'&body='+encodeURIComponent('Adjunto/comparto reporte de préstamo de unidad ${escHtml(folio)}. Guarda este reporte como PDF desde el navegador para anexarlo al correo.')}">Correo opcional</button><h1>Reporte préstamo de unidad ${escHtml(folio)}</h1><div class="grid"><p><b>Tipo salida:</b> ${escHtml(loan.tipo_salida)}</p><p><b>Estado:</b> ${escHtml(loan.estado)}</p><p><b>Empresa:</b> ${escHtml(loan.empresa)}</p><p><b>OP:</b> ${escHtml(loan.op)}</p><p><b>Técnico/usuario:</b> ${escHtml(loan.tecnico_nombre)} ${escHtml(loan.tecnico_numero)}</p><p><b>Cantidad técnicos:</b> ${escHtml(loan.cantidad_tecnicos)}</p><p><b>Licencia:</b> ${escHtml(loan.licencia_numero)}</p><p><b>Vigencia licencia:</b> ${escHtml(loan.licencia_vigencia || '')} · <b>Estado:</b> ${escHtml(loan.licencia_estado || '')}</p><p><b>Unidad asignada:</b> ${escHtml(loan.unidad_asignada)}</p><p><b>Remolque:</b> ${escHtml(loan.lleva_remolque)} ${escHtml(loan.datos_remolque)}</p><p><b>Sucursal/área:</b> ${escHtml(loan.sucursal)} · ${escHtml(loan.area)}</p></div>${ch.rows.map(renderChecklist).join('')}${pe.rows.map(renderPercance).join('')}</body></html>`);
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte ${escHtml(folio)}</title><style>
+    @page{size:letter;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#20242a;background:#f2f4f7}.paper{max-width:980px;margin:18px auto;background:white;padding:26px;box-shadow:0 10px 35px #0002;border-radius:18px}.top{display:flex;align-items:center;gap:18px;border-bottom:5px solid #ff6a00;padding-bottom:14px;margin-bottom:16px}.logo{width:210px;max-height:80px;object-fit:contain;border:2px solid #ff6a00;border-radius:12px;padding:6px}.title h1{margin:0;font-size:28px;color:#111}.title p{margin:4px 0;color:#666}.badge{display:inline-block;border-radius:999px;padding:7px 12px;font-weight:900;background:#111;color:white}.badge.ok{background:#0f8a4b}.badge.warn{background:#b7791f}.badge.bad{background:#b42318}.actions{margin:0 auto 10px;max-width:980px;text-align:right}.btn{background:#ff6a00;color:white;border:0;border-radius:10px;padding:10px 14px;font-weight:bold;cursor:pointer}.btn-dark{background:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.box{border:1px solid #d8dde3;border-radius:12px;padding:10px;background:#fbfcfd}.summary{margin:14px 0 18px}.report-section{page-break-inside:avoid;border:1px solid #d8dde3;border-radius:16px;margin-top:18px;padding:16px;background:#fff}.report-section.danger{border-color:#ffb3aa}.section-title{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:2px solid #eef1f4;margin-bottom:12px}.section-title h2{margin:0 0 8px}.section-title span{font-weight:700;color:#666}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #d8dde3;padding:8px;text-align:left;font-size:13px}th{background:#111;color:#fff}.photos{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.photos figure{margin:0;border:1px solid #d8dde3;border-radius:14px;padding:8px;background:#fafafa;page-break-inside:avoid}.photos img{width:100%;height:260px;object-fit:contain;background:white;border-radius:10px;border:1px solid #ddd}.photos figcaption{font-size:12px;color:#555;margin-top:6px}.photos small{word-break:break-all;color:#777}.empty-photos{border:1px dashed #bbb;border-radius:12px;padding:14px;color:#666;background:#fafafa}.pdf-fuel{border:1px solid #d8dde3;border-radius:14px;padding:8px;text-align:center;max-width:360px;margin:12px 0;background:#fbfcfd}.pdf-fuel h3{margin:0 0 6px;color:#111}.signatures img{background:white}.muted{color:#666;font-size:12px}@media print{body{background:white}.paper{box-shadow:none;margin:0;padding:0;border-radius:0}.actions{display:none}.photos{grid-template-columns:repeat(2,1fr)}.photos img{height:235px}.report-section{break-inside:avoid}}
+  </style></head><body><div class="actions"><button class="btn" onclick="window.print()">Imprimir / Guardar como PDF</button> <button class="btn btn-dark" onclick="const c=prompt('Correo destino:'); if(c){location.href='mailto:'+encodeURIComponent(c)+'?subject='+encodeURIComponent('Reporte préstamo de unidad ${escHtml(folio)}')+'&body='+encodeURIComponent('Adjunto/comparto reporte de préstamo de unidad ${escHtml(folio)}. Guarda este reporte como PDF desde el navegador para anexarlo al correo.')}" >Correo opcional</button></div><main class="paper"><header class="top"><img class="logo" src="/logo-interbandas.png" alt="Interbandas IBS"><div class="title"><h1>Reporte de entrega / recepción de unidad</h1><p>Folio: <b>${escHtml(folio)}</b> · Generado: ${new Date().toLocaleString('es-MX')}</p><span class="badge ${licenciaClass(licenciaEstado)}">Licencia: ${escHtml(licenciaEstado || 'SIN ESTADO')}</span></div></header><section class="summary"><div class="grid"><div class="box"><b>Tipo salida</b><br>${escHtml(loan.tipo_salida)}</div><div class="box"><b>Estado préstamo</b><br>${escHtml(loan.estado)}</div><div class="box"><b>Empresa / cliente</b><br>${escHtml(loan.empresa)}</div><div class="box"><b>OP / Servicio</b><br>${escHtml(loan.op)}</div><div class="box"><b>Técnico/usuario recibe</b><br>${escHtml(loan.tecnico_nombre)} ${escHtml(loan.tecnico_numero)}</div><div class="box"><b>Cantidad técnicos</b><br>${escHtml(loan.cantidad_tecnicos)}</div><div class="box"><b>Licencia</b><br>${escHtml(loan.licencia_numero)}<br><small>Vigencia: ${escHtml(loan.licencia_vigencia || '')}</small></div><div class="box"><b>Unidad asignada / activo</b><br>${escHtml(loan.unidad_asignada || 'SIN ASIGNAR')}</div><div class="box"><b>Remolque</b><br>${escHtml(loan.lleva_remolque)} ${escHtml(loan.datos_remolque)}</div><div class="box"><b>Sucursal / área</b><br>${escHtml(loan.sucursal)} · ${escHtml(loan.area)}</div></div></section>${ch.rows.map(renderChecklist).join('')}${pe.rows.map(renderPercance).join('')}</main></body></html>`);
 });
+
 
 app.get('/', (req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
 app.get('*', (req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
