@@ -275,6 +275,31 @@ function sameKey(a,b){return normalize(a)===normalize(b)}
 function esMatriz(s){return sameKey(s,'CHIHUAHUA')}
 function tecnicosParaTicket(t){return tecnicos.filter(x=>sameKey(x.sucursal,t.sucursal)||esMatriz(x.sucursal)||!t.sucursal)}
 function normalize(s){return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+function estadoLicencia(fechaVigencia){
+  if(!fechaVigencia){return {ok:false,estado:'SIN FECHA',mensaje:'La vigencia de licencia es obligatoria.'}}
+  const partes=String(fechaVigencia).split('-').map(Number);
+  if(partes.length!==3 || partes.some(n=>!Number.isFinite(n))){return {ok:false,estado:'FORMATO INVALIDO',mensaje:'La vigencia de licencia no es válida.'}}
+  const vigencia=new Date(partes[0],partes[1]-1,partes[2]);
+  const hoy=new Date(); hoy.setHours(0,0,0,0);
+  if(vigencia<hoy){return {ok:false,estado:'VENCIDA',mensaje:'❌ Licencia vencida. No se puede prestar la unidad.'}}
+  if(vigencia.getFullYear()===hoy.getFullYear() && vigencia.getMonth()===hoy.getMonth()){
+    return {ok:true,estado:'PROXIMA A VENCER',mensaje:'⚠️ Licencia próxima a vencer este mes.'}
+  }
+  return {ok:true,estado:'VIGENTE',mensaje:'✅ Licencia vigente.'}
+}
+function validarLicenciaUI(){
+  const box=byId('licenciaEstadoBox');
+  const r=estadoLicencia(val('u_licencia_vigencia'));
+  if(box){
+    box.style.display='block';
+    box.innerHTML=`<b>${esc(r.estado)}</b><br>${esc(r.mensaje)}`;
+    if(r.estado==='VENCIDA'){box.style.background='#ffe5e5';box.style.border='2px solid #d11'}
+    else if(r.estado==='PROXIMA A VENCER'){box.style.background='#fff5d6';box.style.border='2px solid #e0a100'}
+    else if(r.ok){box.style.background='#e7ffe7';box.style.border='2px solid #0a8f3c'}
+    else{box.style.background='#f8fafc';box.style.border='2px solid #999'}
+  }
+  return r;
+}
 const SUCURSAL_ALIAS_GROUPS_FRONT={
   'CHIHUAHUA':['CHIH','CHIH.','CHIHUAHUA','CUU','MATRIZ','IBS CHIHUAHUA','PLANTA CHIHUAHUA','SUCURSAL CHIHUAHUA'],
   'JUAREZ':['JRZ','JUAREZ','JUÁREZ','CD JUAREZ','CD. JUAREZ','CIUDAD JUAREZ','CIUDAD JUÁREZ','SUCURSAL JUAREZ'],
@@ -725,7 +750,7 @@ function unidadPrestamosView(){
   <div class="card"><h2>Cerradas / historial reciente</h2>${tablaPrestamosUnidad(cerradas.slice(0,80),true,'cerradas')}</div>`;
 }
 function solicitudUnidadCard(){
-  return `<div class="notice-box"><b>Regla:</b> el solicitante no asigna unidad. Gerente/Supervisor de Operaciones asigna la unidad. Mantenimiento solo hace checklist, entrega y recepción.</div><div class="grid3"><div><label>Tipo de salida</label><select id="u_tipo_salida"><option>Servicio con técnicos</option><option>Entrega de material/bandas</option><option>Préstamo personal de unidad</option></select></div><div><label>Empresa / cliente</label><input id="u_empresa" placeholder="Empresa visitada"></div><div><label>OP / Servicio</label><input id="u_op" placeholder="OP si aplica"></div></div><label>Técnico/usuario recibe</label><input id="unidadEmpleadoSearch" oninput="buscarEmpleadoUnidad(this.value)" placeholder="Busca por número de empleado o nombre"><input id="unidadEmpleadoId" type="hidden"><input id="unidadEmpleadoNombre" type="hidden"><input id="unidadEmpleadoNumero" type="hidden"><div id="unidadEmpleadoResults"></div><div class="grid3"><div><label>Cantidad de técnicos</label><input id="u_cantidad_tecnicos" type="number" min="1" value="1"></div><div><label>Número / folio de licencia</label><input id="u_licencia_numero" placeholder="Número de licencia"></div><div><label>Foto de licencia</label><input id="u_foto_licencia" type="file" accept="image/*"></div></div><label>¿Lleva remolque?</label><select id="u_lleva_remolque" onchange="byId('u_remolque_box').style.display=this.value==='SI'?'block':'none'"><option value="NO">No</option><option value="SI">Sí</option></select><div id="u_remolque_box" style="display:none"><label>Datos del remolque</label><textarea id="u_datos_remolque" placeholder="Eco, placas, descripción"></textarea></div><button class="btn-orange" onclick="crearSolicitudUnidad()">Crear solicitud de préstamo</button>`;
+  return `<div class="notice-box"><b>Regla:</b> el solicitante no asigna unidad. Gerente/Supervisor de Operaciones asigna la unidad. Mantenimiento solo hace checklist, entrega y recepción.</div><div class="grid3"><div><label>Tipo de salida</label><select id="u_tipo_salida"><option>Servicio con técnicos</option><option>Entrega de material/bandas</option><option>Préstamo personal de unidad</option></select></div><div><label>Empresa / cliente</label><input id="u_empresa" placeholder="Empresa visitada"></div><div><label>OP / Servicio</label><input id="u_op" placeholder="OP si aplica"></div></div><label>Técnico/usuario recibe</label><input id="unidadEmpleadoSearch" oninput="buscarEmpleadoUnidad(this.value)" placeholder="Busca por número de empleado o nombre"><input id="unidadEmpleadoId" type="hidden"><input id="unidadEmpleadoNombre" type="hidden"><input id="unidadEmpleadoNumero" type="hidden"><div id="unidadEmpleadoResults"></div><div class="grid4"><div><label>Cantidad de técnicos</label><input id="u_cantidad_tecnicos" type="number" min="1" value="1"></div><div><label>Número / folio de licencia</label><input id="u_licencia_numero" placeholder="Número de licencia"></div><div><label>Vigencia de licencia</label><input id="u_licencia_vigencia" type="date" onchange="validarLicenciaUI()"></div><div><label>Foto de licencia</label><input id="u_foto_licencia" type="file" accept="image/*"></div></div><div id="licenciaEstadoBox" class="notice-box" style="display:none;margin-top:8px"></div><label>¿Lleva remolque?</label><select id="u_lleva_remolque" onchange="byId('u_remolque_box').style.display=this.value==='SI'?'block':'none'"><option value="NO">No</option><option value="SI">Sí</option></select><div id="u_remolque_box" style="display:none"><label>Datos del remolque</label><textarea id="u_datos_remolque" placeholder="Eco, placas, descripción"></textarea></div><button class="btn-orange" onclick="crearSolicitudUnidad()">Crear solicitud de préstamo</button>`;
 }
 function solicitudesMttoPanel(rows){
   const nuevas=(rows||[]).filter(x=>['SOLICITADO','TOMADA','ASIGNADO','EN ENTREGA'].includes(String(x.estado||''))).length;
@@ -763,11 +788,14 @@ async function crearSolicitudUnidad(){
   if(!val('unidadEmpleadoNombre')) return alert('Selecciona el técnico/usuario desde la base de empleados.');
   if(!val('u_empresa')) return alert('Captura empresa.');
   if(!val('u_licencia_numero') && !filesOf('u_foto_licencia').length) return alert('Captura número de licencia o anexa foto de licencia.');
+  const lic=validarLicenciaUI();
+  if(!lic.ok) return alert(lic.mensaje);
+  if(lic.estado==='PROXIMA A VENCER' && !confirm('La licencia está próxima a vencer este mes.\n\n¿Deseas continuar con el préstamo?')) return;
   const fd=new FormData();
-  ['u_tipo_salida','u_empresa','u_op','unidadEmpleadoId','unidadEmpleadoNombre','unidadEmpleadoNumero','u_cantidad_tecnicos','u_licencia_numero','u_lleva_remolque','u_datos_remolque'].forEach(id=>fd.append(id.replace('u_','').replace('unidadEmpleado','tecnico_'), val(id)));
+  ['u_tipo_salida','u_empresa','u_op','unidadEmpleadoId','unidadEmpleadoNombre','unidadEmpleadoNumero','u_cantidad_tecnicos','u_licencia_numero','u_licencia_vigencia','u_lleva_remolque','u_datos_remolque'].forEach(id=>fd.append(id.replace('u_','').replace('unidadEmpleado','tecnico_'), val(id)));
   fd.set('tipo_salida', val('u_tipo_salida')); fd.set('empresa', val('u_empresa')); fd.set('op', val('u_op'));
   fd.set('tecnico_id', val('unidadEmpleadoId')); fd.set('tecnico_nombre', val('unidadEmpleadoNombre')); fd.set('tecnico_numero', val('unidadEmpleadoNumero'));
-  fd.set('cantidad_tecnicos', val('u_cantidad_tecnicos')); fd.set('licencia_numero', val('u_licencia_numero')); fd.set('lleva_remolque', val('u_lleva_remolque')); fd.set('datos_remolque', val('u_datos_remolque'));
+  fd.set('cantidad_tecnicos', val('u_cantidad_tecnicos')); fd.set('licencia_numero', val('u_licencia_numero')); fd.set('licencia_vigencia', val('u_licencia_vigencia')); fd.set('licencia_estado', estadoLicencia(val('u_licencia_vigencia')).estado); fd.set('lleva_remolque', val('u_lleva_remolque')); fd.set('datos_remolque', val('u_datos_remolque'));
   const f=filesOf('u_foto_licencia')[0]; if(f) fd.append('foto_licencia', f);
   try{showLoading('Creando solicitud...');await api('/api/unidad-prestamos',{method:'POST',body:fd});alert('Solicitud creada. Mantenimiento asignará unidad.');await render();}catch(e){alert(e.message)}finally{hideLoading()}
 }
