@@ -18,6 +18,10 @@
 .fuel-wrap{background:#101010;border:4px solid #2b2b2b;border-radius:26px;padding:22px;color:#fff;text-align:center;margin:14px 0}
 .fuel-gauge{width:320px;height:230px;margin:0 auto;position:relative;background:radial-gradient(circle,#222 0%,#111 58%,#050505 61%,#000 100%);border-radius:50%;box-shadow:inset 0 0 30px #000,0 8px 26px #0006;overflow:hidden}
 .fuel-arc{position:absolute;left:42px;top:38px;width:236px;height:236px;border-radius:50%;border:13px solid #f5f5f5;border-bottom-color:transparent;border-left-color:#f5f5f5;border-right-color:#f5f5f5;clip-path:polygon(0 0,100% 0,100% 63%,0 63%);opacity:.95}.fuel-mark{position:absolute;font-weight:900;color:white;font-size:24px;text-shadow:0 2px 5px #000}.fuel-e{left:52px;top:143px}.fuel-q{left:73px;top:82px}.fuel-h{left:142px;top:52px}.fuel-tq{right:58px;top:82px}.fuel-f{right:56px;top:143px}.fuel-needle{position:absolute;width:118px;height:8px;background:#e51b24;border-radius:999px;left:160px;top:155px;transform-origin:0% 50%;transform:rotate(0deg);box-shadow:0 0 9px #000;z-index:3}.fuel-center{position:absolute;width:62px;height:62px;background:#444;border:8px solid #666;border-radius:50%;left:129px;top:126px;z-index:4}.fuel-slider{width:100%;accent-color:var(--orange);margin-top:18px}.fuel-quick{display:flex;justify-content:center;gap:7px;flex-wrap:wrap;margin-top:10px}.fuel-quick button{background:#fff;color:#111;border-radius:999px;padding:7px 10px;font-size:12px}.unit-row-actions button{margin:3px}.loan-tech-row{background:#f8fafc;border:1px dashed #cbd5e1;border-radius:16px;padding:13px;margin:8px 0}.unit-status{font-weight:900;color:var(--orange)}
+.photo-preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:10px}
+.photo-preview-card{border:1px solid var(--line);border-radius:14px;background:#fff;padding:7px;box-shadow:0 4px 12px #0001}
+.photo-preview-card img{width:100%;height:105px;object-fit:cover;border-radius:10px;background:#f8fafc}
+.photo-preview-card small{display:block;margin-top:5px;color:#555;word-break:break-all;font-size:11px}
 
 </style>
 </head>
@@ -918,7 +922,7 @@ function checklistItem(nombre,key){return `<div class="card" style="box-shadow:n
 function abrirChecklistUnidad(folio,tipo){
   const div=document.createElement('div');div.className='modal-backdrop';div.id='modalChecklistUnidad';
   const prefix=tipo==='ENTREGA'?'entrega':'recepcion';
-  div.innerHTML=`<div class="modal-card" style="max-width:1120px;max-height:92vh;overflow:auto"><h2>Checklist de ${tipo==='ENTREGA'?'entrega':'recepción'} · ${esc(folio)}</h2><p class="muted">Cada punto que Sí aplica debe quedar revisado. Sin checklist completo no se puede entregar/cerrar unidad.</p><div class="grid3"><div><label>KM ${tipo==='ENTREGA'?'inicial':'final'}</label><input id="chk_km" type="number"></div><div><label>Fecha/hora</label><input id="chk_fecha" value="${new Date().toLocaleString()}"></div><div><label>Observaciones generales</label><input id="chk_obs" placeholder="Observaciones"></div></div>${fuelGauge(prefix,50)}<h2>Checklist obligatorio</h2><div class="grid4">${checklistItem('Luces','luces')}${checklistItem('Intermitentes','intermitentes')}${checklistItem('Llanta extra','llanta_extra')}${checklistItem('Documentos','documentos')}${checklistItem('Póliza de seguro','poliza')}${checklistItem('Nivel de agua','agua')}${checklistItem('Nivel de aceite','aceite')}${checklistItem('Líquido de frenos','frenos')}${checklistItem('Limpiaparabrisas','limpia')}${checklistItem('Condición interior','interior')}${checklistItem('Alarma de reversa','alarma')}${checklistItem('Torreta','torreta')}${checklistItem('Tacón','tacon')}${checklistItem('Cono de seguridad','cono')}${checklistItem('Pértiga','pertiga')}</div><div class="grid"><div><label>Número de póliza</label><input id="poliza_numero"></div><div><label>Vigencia póliza</label><input id="poliza_vigencia" type="date"></div></div><label>Fotos múltiples de ${tipo==='ENTREGA'?'entrega':'recepción'} / daños</label><input id="chk_fotos" type="file" multiple accept="image/*"><div class="grid"><div><label>Firma técnico/usuario</label><button class="btn-orange" onclick="abrirFirma('firma_tecnico')">Firmar</button><input id="firma_tecnico" placeholder="Firma guardada" readonly></div><div><label>Firma mantenimiento</label><button class="btn-orange" onclick="abrirFirma('firma_mtto')">Firmar</button><input id="firma_mtto" placeholder="Firma guardada" readonly></div></div><div class="modal-actions"><button class="btn-green" onclick="guardarChecklistUnidad('${folio}','${tipo}')">Guardar checklist</button><button class="btn-gray" onclick="byId('modalChecklistUnidad').remove()">Cerrar</button></div></div>`;
+  div.innerHTML=`<div class="modal-card" style="max-width:1120px;max-height:92vh;overflow:auto"><h2>Checklist de ${tipo==='ENTREGA'?'entrega':'recepción'} · ${esc(folio)}</h2><p class="muted">Cada punto que Sí aplica debe quedar revisado. Sin checklist completo no se puede entregar/cerrar unidad.</p><div class="grid3"><div><label>KM ${tipo==='ENTREGA'?'inicial':'final'}</label><input id="chk_km" type="number"></div><div><label>Fecha/hora</label><input id="chk_fecha" value="${new Date().toLocaleString()}"></div><div><label>Observaciones generales</label><input id="chk_obs" placeholder="Observaciones"></div></div>${fuelGauge(prefix,50)}<h2>Checklist obligatorio</h2><div class="grid4">${checklistItem('Luces','luces')}${checklistItem('Intermitentes','intermitentes')}${checklistItem('Llanta extra','llanta_extra')}${checklistItem('Documentos','documentos')}${checklistItem('Póliza de seguro','poliza')}${checklistItem('Nivel de agua','agua')}${checklistItem('Nivel de aceite','aceite')}${checklistItem('Líquido de frenos','frenos')}${checklistItem('Limpiaparabrisas','limpia')}${checklistItem('Condición interior','interior')}${checklistItem('Alarma de reversa','alarma')}${checklistItem('Torreta','torreta')}${checklistItem('Tacón','tacon')}${checklistItem('Cono de seguridad','cono')}${checklistItem('Pértiga','pertiga')}${checklistItem('Extintor','extintor')}${checklistItem('Botiquín','botiquin')}${checklistItem('Triángulos / reflejantes','triangulos')}${checklistItem('Gato y herramienta','gato_herramienta')}${checklistItem('Estado de llantas','llantas')}${checklistItem('Cinturones de seguridad','cinturones')}${checklistItem('Claxon','claxon')}${checklistItem('Espejos','espejos')}${checklistItem('Placas visibles','placas')}${checklistItem('Fugas visibles','fugas')}</div><div class="grid"><div><label>Número de póliza</label><input id="poliza_numero"></div><div><label>Vigencia póliza</label><input id="poliza_vigencia" type="date"></div></div><label>Fotos múltiples de ${tipo==='ENTREGA'?'entrega':'recepción'} / daños</label><input id="chk_fotos" type="file" multiple accept="image/*" onchange="previewChecklistFotos()"><div class="notice-box"><b>Vista previa de evidencia:</b> estas son las imágenes que se guardarán y saldrán en el PDF del reporte.</div><div id="chk_fotos_preview" class="photo-preview-grid"></div><div class="grid"><div><label>Firma técnico/usuario</label><button class="btn-orange" onclick="abrirFirma('firma_tecnico')">Firmar</button><input id="firma_tecnico" placeholder="Firma guardada" readonly></div><div><label>Firma mantenimiento</label><button class="btn-orange" onclick="abrirFirma('firma_mtto')">Firmar</button><input id="firma_mtto" placeholder="Firma guardada" readonly></div></div><div class="modal-actions"><button class="btn-green" onclick="guardarChecklistUnidad('${folio}','${tipo}')">Guardar checklist</button><button class="btn-gray" onclick="byId('modalChecklistUnidad').remove()">Cerrar</button></div></div>`;
   document.body.appendChild(div);updateFuelGauge(prefix);
 }
 let firmaDestino='';
@@ -942,8 +946,22 @@ function prepararCanvasFirma(){
 function limpiarFirmaCanvas(){const c=byId('firmaCanvas'), ctx=c.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,c.width,c.height)}
 function guardarFirmaCanvas(){const c=byId('firmaCanvas'); if(!firmaDestino || !byId(firmaDestino)) return; byId(firmaDestino).value=c.toDataURL('image/png'); byId('modalFirma').remove()}
 function marcarFirma(id){abrirFirma(id)}
+function previewChecklistFotos(){
+  const cont=byId('chk_fotos_preview');
+  if(!cont) return;
+  const fotos=filesOf('chk_fotos');
+  if(!fotos.length){ cont.innerHTML='<div class="empty">No hay fotos seleccionadas.</div>'; return; }
+  cont.innerHTML='';
+  fotos.forEach((f,idx)=>{
+    const url=URL.createObjectURL(f);
+    const card=document.createElement('div');
+    card.className='photo-preview-card';
+    card.innerHTML=`<img src="${url}" alt="Foto ${idx+1}"><small>${idx+1}. ${esc(f.name)}</small>`;
+    cont.appendChild(card);
+  });
+}
 function leerChecklistPayload(prefix){
-  const keys=['luces','intermitentes','llanta_extra','documentos','poliza','agua','aceite','frenos','limpia','interior','alarma','torreta','tacon','cono','pertiga'];
+  const keys=['luces','intermitentes','llanta_extra','documentos','poliza','agua','aceite','frenos','limpia','interior','alarma','torreta','tacon','cono','pertiga','extintor','botiquin','triangulos','gato_herramienta','llantas','cinturones','claxon','espejos','placas','fugas'];
   const items={};
   for(const k of keys){items[k]={aplica:val(k+'_aplica'),ok:byId(k+'_ok')?.checked||false,obs:val(k+'_obs')}}
   return {km:val('chk_km'),fecha:val('chk_fecha'),observaciones:val('chk_obs'),combustible:Number(val(prefix+'Combustible')||0),items,poliza_numero:val('poliza_numero'),poliza_vigencia:val('poliza_vigencia'),firma_tecnico:val('firma_tecnico'),firma_mtto:val('firma_mtto')}
@@ -1019,6 +1037,7 @@ window.tomarRecepcionUnidad=tomarRecepcionUnidad;
 window.abrirPdfTicket=abrirPdfTicket;
 window.abrirChecklistUnidad=abrirChecklistUnidad;
 window.marcarFirma=marcarFirma;
+window.previewChecklistFotos=previewChecklistFotos;
 window.guardarChecklistUnidad=guardarChecklistUnidad;
 window.abrirPercanceUnidad=abrirPercanceUnidad;
 window.guardarPercanceUnidad=guardarPercanceUnidad;
