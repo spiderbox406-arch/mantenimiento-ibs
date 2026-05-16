@@ -608,6 +608,8 @@ async function initDb(){
       tecnico_numero text,
       cantidad_tecnicos int default 1,
       licencia_numero text,
+      licencia_vigencia text,
+      licencia_estado text,
       lleva_remolque text default 'NO',
       datos_remolque text,
       unidad_asignada text,
@@ -641,6 +643,8 @@ async function initDb(){
   `);
 
   await pool.query(`
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS licencia_vigencia text;
+    ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS licencia_estado text;
     ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_id bigint references users(id);
     ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_username text;
     ALTER TABLE unidad_prestamos ADD COLUMN IF NOT EXISTS tomada_por_nombre text;
@@ -1705,6 +1709,19 @@ function firmaImg(v){
   return escHtml(s || '-');
 }
 function escHtml(v){ return String(v ?? '').replace(/[&<>\"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#039;'}[c])); }
+function estadoLicenciaServer(fechaVigencia){
+  const fecha = clean(fechaVigencia);
+  if(!fecha) return {ok:false, estado:'SIN FECHA', mensaje:'La vigencia de licencia es obligatoria.'};
+  const m = fecha.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if(!m) return {ok:false, estado:'FORMATO INVALIDO', mensaje:'La vigencia de licencia debe tener formato válido.'};
+  const vigencia = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+  const hoy = new Date();
+  hoy.setHours(0,0,0,0);
+  if(Number.isNaN(vigencia.getTime())) return {ok:false, estado:'FORMATO INVALIDO', mensaje:'La vigencia de licencia no es válida.'};
+  if(vigencia < hoy) return {ok:false, estado:'VENCIDA', mensaje:'Licencia vencida. No se puede hacer el préstamo de unidad.'};
+  if(vigencia.getFullYear() === hoy.getFullYear() && vigencia.getMonth() === hoy.getMonth()) return {ok:true, estado:'PROXIMA A VENCER', mensaje:'Licencia próxima a vencer este mes.'};
+  return {ok:true, estado:'VIGENTE', mensaje:'Licencia vigente.'};
+}
 app.get('/api/unidad-prestamos', requireLogin, async (req,res)=>{
   const user=req.session.user;
   const params=[]; const clauses=[];
@@ -1833,7 +1850,7 @@ app.get('/api/unidad-prestamos/:folio/reporte', requireLogin, async (req,res)=>{
   };
   const renderPercance=(x)=>{ const d=x.datos||{}; return `<section><h2>Reporte de percance / daño · ${new Date(x.creado).toLocaleString('es-MX')}</h2><p><b>Hechos:</b><br>${escHtml(x.hechos)}</p><p><b>Daños:</b><br>${escHtml(x.danos)}</p><p><b>Acciones:</b><br>${escHtml(x.acciones)}</p><div class="grid"><div><b>Firma técnico/usuario</b><br>${firmaImg(d.firma_tecnico)}</div><div><b>Firma mantenimiento</b><br>${firmaImg(d.firma_mtto)}</div></div><div class="photos">${renderFotos(d)}</div></section>`; };
   res.setHeader('Content-Type','text/html; charset=utf-8');
-  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte ${escHtml(folio)}</title><style>body{font-family:Arial;margin:28px;color:#222}h1{border-bottom:4px solid #ff6a00;padding-bottom:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #ccc;padding:7px;text-align:left}.photos img{max-width:180px;max-height:140px;margin:6px;border:1px solid #ccc;border-radius:8px}.pdf-fuel{border:1px solid #ccc;border-radius:12px;padding:8px;text-align:center;max-width:350px}.pdf-fuel h3{margin:0 0 6px;color:#111}section{page-break-inside:avoid;border-top:2px solid #eee;margin-top:18px;padding-top:12px}.btn{background:#ff6a00;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><button class="btn no-print" onclick="window.print()">Imprimir / Guardar como PDF</button><h1>Reporte préstamo de unidad ${escHtml(folio)}</h1><div class="grid"><p><b>Tipo salida:</b> ${escHtml(loan.tipo_salida)}</p><p><b>Estado:</b> ${escHtml(loan.estado)}</p><p><b>Empresa:</b> ${escHtml(loan.empresa)}</p><p><b>OP:</b> ${escHtml(loan.op)}</p><p><b>Técnico/usuario:</b> ${escHtml(loan.tecnico_nombre)} ${escHtml(loan.tecnico_numero)}</p><p><b>Cantidad técnicos:</b> ${escHtml(loan.cantidad_tecnicos)}</p><p><b>Licencia:</b> ${escHtml(loan.licencia_numero)}</p><p><b>Unidad asignada:</b> ${escHtml(loan.unidad_asignada)}</p><p><b>Remolque:</b> ${escHtml(loan.lleva_remolque)} ${escHtml(loan.datos_remolque)}</p><p><b>Sucursal/área:</b> ${escHtml(loan.sucursal)} · ${escHtml(loan.area)}</p></div>${ch.rows.map(renderChecklist).join('')}${pe.rows.map(renderPercance).join('')}</body></html>`);
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte ${escHtml(folio)}</title><style>body{font-family:Arial;margin:28px;color:#222}h1{border-bottom:4px solid #ff6a00;padding-bottom:10px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #ccc;padding:7px;text-align:left}.photos img{max-width:180px;max-height:140px;margin:6px;border:1px solid #ccc;border-radius:8px}.pdf-fuel{border:1px solid #ccc;border-radius:12px;padding:8px;text-align:center;max-width:350px}.pdf-fuel h3{margin:0 0 6px;color:#111}section{page-break-inside:avoid;border-top:2px solid #eee;margin-top:18px;padding-top:12px}.btn{background:#ff6a00;color:white;border:0;border-radius:8px;padding:10px 14px;font-weight:bold}@media print{.no-print{display:none}}</style></head><body><button class="btn no-print" onclick="window.print()">Imprimir / Guardar como PDF</button> <button class="btn no-print" onclick="const c=prompt('Correo destino:'); if(c){location.href='mailto:'+encodeURIComponent(c)+'?subject='+encodeURIComponent('Reporte préstamo de unidad ${escHtml(folio)}')+'&body='+encodeURIComponent('Adjunto/comparto reporte de préstamo de unidad ${escHtml(folio)}. Guarda este reporte como PDF desde el navegador para anexarlo al correo.')}">Correo opcional</button><h1>Reporte préstamo de unidad ${escHtml(folio)}</h1><div class="grid"><p><b>Tipo salida:</b> ${escHtml(loan.tipo_salida)}</p><p><b>Estado:</b> ${escHtml(loan.estado)}</p><p><b>Empresa:</b> ${escHtml(loan.empresa)}</p><p><b>OP:</b> ${escHtml(loan.op)}</p><p><b>Técnico/usuario:</b> ${escHtml(loan.tecnico_nombre)} ${escHtml(loan.tecnico_numero)}</p><p><b>Cantidad técnicos:</b> ${escHtml(loan.cantidad_tecnicos)}</p><p><b>Licencia:</b> ${escHtml(loan.licencia_numero)}</p><p><b>Vigencia licencia:</b> ${escHtml(loan.licencia_vigencia || '')} · <b>Estado:</b> ${escHtml(loan.licencia_estado || '')}</p><p><b>Unidad asignada:</b> ${escHtml(loan.unidad_asignada)}</p><p><b>Remolque:</b> ${escHtml(loan.lleva_remolque)} ${escHtml(loan.datos_remolque)}</p><p><b>Sucursal/área:</b> ${escHtml(loan.sucursal)} · ${escHtml(loan.area)}</p></div>${ch.rows.map(renderChecklist).join('')}${pe.rows.map(renderPercance).join('')}</body></html>`);
 });
 
 app.get('/', (req,res)=> res.sendFile(path.join(__dirname,'public','index.html')));
