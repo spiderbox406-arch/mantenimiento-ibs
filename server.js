@@ -51,6 +51,23 @@ app.use(session({
   rolling: true,
   cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 2 }
 }));
+function findUploadedFileByBasename(dir, basename, depth = 0){
+  // Respaldo seguro: si la ruta guardada en BD quedó vieja/larga,
+  // busca el archivo por nombre dentro de public/uploads para poder mostrar la evidencia.
+  if(!basename || depth > 4) return '';
+  let entries = [];
+  try{ entries = fs.readdirSync(dir, { withFileTypes:true }); }catch(e){ return ''; }
+  for(const entry of entries){
+    const full = path.join(dir, entry.name);
+    if(entry.isFile() && entry.name === basename) return full;
+    if(entry.isDirectory()){
+      const found = findUploadedFileByBasename(full, basename, depth + 1);
+      if(found) return found;
+    }
+  }
+  return '';
+}
+
 // Ruta explícita para servir fotografías guardadas en public/uploads.
 // Esto evita problemas en Render cuando las imágenes están en subcarpetas por unidad/fecha.
 app.get(/^\/uploads\/(.+)$/, (req, res) => {
@@ -58,8 +75,14 @@ app.get(/^\/uploads\/(.+)$/, (req, res) => {
     const rawRel = req.params[0] || '';
     const decoded = decodeURIComponent(rawRel);
     const normalized = path.normalize(decoded).replace(/^(\.\.(\/|\\|$))+/, '');
-    const filePath = path.join(uploadDir, normalized);
+    let filePath = path.join(uploadDir, normalized);
     if(!filePath.startsWith(uploadDir)) return res.status(403).send('Ruta no permitida');
+
+    if(!fs.existsSync(filePath)){
+      const fallback = findUploadedFileByBasename(uploadDir, path.basename(normalized));
+      if(fallback && fallback.startsWith(uploadDir)) filePath = fallback;
+    }
+
     if(!fs.existsSync(filePath)) return res.status(404).send('Imagen no encontrada');
     return res.sendFile(filePath);
   }catch(e){
@@ -1726,14 +1749,28 @@ function safeFolderName(v){
     .replace(/[^a-zA-Z0-9_-]/g,'_')
     .replace(/_+/g,'_')
     .replace(/^_+|_+$/g,'')
-    .slice(0,50) || 'SIN_UNIDAD';
+    .slice(0,30) || 'SIN_UNIDAD';
+}
+function extractUnitNumber(v){
+  const raw = clean(v || '');
+  if(!raw) return '';
+
+  // Primero toma el primer bloque útil antes de descripciones largas.
+  // Ejemplo: "IBS-139 2022 VOLKSWAGEN..." => "IBS-139"
+  const first = raw.split(/[|,;\n]/)[0].trim();
+
+  // Patrones comunes de activo/unidad: IBS-139, UNI-001, ECO-25, U-15.
+  const m = first.match(/\b([A-Z]{1,8})[-_\s]?(\d{1,8})\b/i);
+  if(m) return `${m[1].toUpperCase()}-${m[2]}`;
+
+  // Si no hay prefijo, usa la primera palabra/código corto.
+  const token = first.split(/\s+/)[0];
+  return token || raw;
 }
 function unidadFolderName(loan){
-  // La carpeta debe ser el número de activo/unidad, no toda la descripción larga.
-  const raw = clean(loan?.unidad_asignada || loan?.activo || loan?.folio || 'SIN_UNIDAD');
-  const m = raw.match(/[A-Z]{2,}[-_ ]?\d+[A-Z0-9-]*/i);
-  if(m) return safeFolderName(m[0].replace(/\s+/g,'-'));
-  return safeFolderName(raw.split(/[|,;]/)[0]);
+  // La carpeta debe ser SOLO el número de activo/unidad, no toda la descripción larga.
+  const raw = loan?.unidad_asignada || loan?.activo || loan?.folio || 'SIN_UNIDAD';
+  return safeFolderName(extractUnitNumber(raw));
 }
 function publicUploadUrl(src){
   const value = clean(src);
