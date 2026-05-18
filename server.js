@@ -51,6 +51,22 @@ app.use(session({
   rolling: true,
   cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 1000 * 60 * 60 * 2 }
 }));
+// Ruta explícita para servir fotografías guardadas en public/uploads.
+// Esto evita problemas en Render cuando las imágenes están en subcarpetas por unidad/fecha.
+app.get(/^\/uploads\/(.+)$/, (req, res) => {
+  try{
+    const rawRel = req.params[0] || '';
+    const decoded = decodeURIComponent(rawRel);
+    const normalized = path.normalize(decoded).replace(/^(\.\.(\/|\\|$))+/, '');
+    const filePath = path.join(uploadDir, normalized);
+    if(!filePath.startsWith(uploadDir)) return res.status(403).send('Ruta no permitida');
+    if(!fs.existsSync(filePath)) return res.status(404).send('Imagen no encontrada');
+    return res.sendFile(filePath);
+  }catch(e){
+    return res.status(400).send('Ruta de imagen inválida');
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 function clean(v){ return String(v ?? '').trim(); }
@@ -1704,7 +1720,32 @@ function uploadedPaths(files, field){
   return arr.map(f => '/uploads/' + path.basename(f.filename));
 }
 function safeFolderName(v){
-  return clean(v || 'SIN_UNIDAD').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9_-]/g,'_').replace(/_+/g,'_').slice(0,80) || 'SIN_UNIDAD';
+  return clean(v || 'SIN_UNIDAD')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-zA-Z0-9_-]/g,'_')
+    .replace(/_+/g,'_')
+    .replace(/^_+|_+$/g,'')
+    .slice(0,50) || 'SIN_UNIDAD';
+}
+function unidadFolderName(loan){
+  // La carpeta debe ser el número de activo/unidad, no toda la descripción larga.
+  const raw = clean(loan?.unidad_asignada || loan?.activo || loan?.folio || 'SIN_UNIDAD');
+  const m = raw.match(/[A-Z]{2,}[-_ ]?\d+[A-Z0-9-]*/i);
+  if(m) return safeFolderName(m[0].replace(/\s+/g,'-'));
+  return safeFolderName(raw.split(/[|,;]/)[0]);
+}
+function publicUploadUrl(src){
+  const value = clean(src);
+  if(!value) return '';
+  if(value.startsWith('data:image/')) return value;
+  let rel = value.replace(/\\/g,'/');
+  const marker = '/uploads/';
+  const idx = rel.indexOf(marker);
+  if(idx >= 0) rel = rel.slice(idx);
+  if(!rel.startsWith('/uploads/')) rel = '/uploads/' + rel.replace(/^\/+/, '');
+  // Codifica cada segmento para que espacios o caracteres especiales no rompan el PDF/reporte.
+  return rel.split('/').map((part, i) => i === 0 ? '' : encodeURIComponent(part)).join('/');
 }
 function fechaCarpeta(d = new Date()){
   const y=d.getFullYear();
@@ -1714,7 +1755,7 @@ function fechaCarpeta(d = new Date()){
 }
 function moveUploadedFilesToUnitFolder(files, field, loan, tipo){
   const arr = files && files[field] ? files[field] : [];
-  const unidad = safeFolderName(loan.unidad_asignada || loan.activo || loan.folio || 'SIN_UNIDAD');
+  const unidad = unidadFolderName(loan);
   const tipoFolder = safeFolderName(String(tipo || 'CHECKLIST').toLowerCase());
   const folderDate = `${tipoFolder}_${fechaCarpeta()}`;
   const folder = path.join(uploadDir, unidad, folderDate);
@@ -1730,7 +1771,7 @@ function moveUploadedFilesToUnitFolder(files, field, loan, tipo){
       fs.copyFileSync(f.path, dest);
       try{ fs.unlinkSync(f.path); }catch(_e){}
     }
-    return `/uploads/${unidad}/${folderDate}/${filename}`;
+    return publicUploadUrl(`/uploads/${unidad}/${folderDate}/${filename}`);
   });
 }
 function firmaImg(v){
@@ -1888,7 +1929,10 @@ app.get('/api/unidad-prestamos/:folio/reporte', requireLogin, async (req,res)=>{
   const renderFotos=(datos)=> {
     const fotos = Array.isArray(datos.fotos) ? datos.fotos : [];
     if(!fotos.length) return '<div class="empty-photos">Sin fotografías anexadas en este apartado.</div>';
-    return fotos.map((src,idx)=>`<figure><img src="${escHtml(src)}"><figcaption>Foto ${idx+1}<br><small>${escHtml(src)}</small></figcaption></figure>`).join('');
+    return fotos.map((src,idx)=>{
+      const url = publicUploadUrl(src);
+      return `<figure><a href="${escHtml(url)}" target="_blank"><img src="${escHtml(url)}" loading="lazy" onerror="this.parentElement.parentElement.classList.add('img-error')"></a><figcaption>Foto ${idx+1}<br><small>${escHtml(url)}</small></figcaption></figure>`;
+    }).join('');
   };
   const renderChecklist=(c)=>{
     const d=normalizeJsonb(c.datos); const items=d.items||{};
@@ -1899,7 +1943,7 @@ app.get('/api/unidad-prestamos/:folio/reporte', requireLogin, async (req,res)=>{
   const licenciaEstado = loan.licencia_estado || '';
   res.setHeader('Content-Type','text/html; charset=utf-8');
   res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Reporte ${escHtml(folio)}</title><style>
-    @page{size:letter;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#20242a;background:#f2f4f7}.paper{max-width:980px;margin:18px auto;background:white;padding:26px;box-shadow:0 10px 35px #0002;border-radius:18px}.top{display:flex;align-items:center;gap:18px;border-bottom:5px solid #ff6a00;padding-bottom:14px;margin-bottom:16px}.logo{width:210px;max-height:80px;object-fit:contain;border:2px solid #ff6a00;border-radius:12px;padding:6px}.title h1{margin:0;font-size:28px;color:#111}.title p{margin:4px 0;color:#666}.badge{display:inline-block;border-radius:999px;padding:7px 12px;font-weight:900;background:#111;color:white}.badge.ok{background:#0f8a4b}.badge.warn{background:#b7791f}.badge.bad{background:#b42318}.actions{margin:0 auto 10px;max-width:980px;text-align:right}.btn{background:#ff6a00;color:white;border:0;border-radius:10px;padding:10px 14px;font-weight:bold;cursor:pointer}.btn-dark{background:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.box{border:1px solid #d8dde3;border-radius:12px;padding:10px;background:#fbfcfd}.summary{margin:14px 0 18px}.report-section{page-break-inside:avoid;border:1px solid #d8dde3;border-radius:16px;margin-top:18px;padding:16px;background:#fff}.report-section.danger{border-color:#ffb3aa}.section-title{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:2px solid #eef1f4;margin-bottom:12px}.section-title h2{margin:0 0 8px}.section-title span{font-weight:700;color:#666}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #d8dde3;padding:8px;text-align:left;font-size:13px}th{background:#111;color:#fff}.photos{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.photos figure{margin:0;border:1px solid #d8dde3;border-radius:14px;padding:8px;background:#fafafa;page-break-inside:avoid}.photos img{width:100%;height:260px;object-fit:contain;background:white;border-radius:10px;border:1px solid #ddd}.photos figcaption{font-size:12px;color:#555;margin-top:6px}.photos small{word-break:break-all;color:#777}.empty-photos{border:1px dashed #bbb;border-radius:12px;padding:14px;color:#666;background:#fafafa}.pdf-fuel{border:1px solid #d8dde3;border-radius:14px;padding:8px;text-align:center;max-width:360px;margin:12px 0;background:#fbfcfd}.pdf-fuel h3{margin:0 0 6px;color:#111}.signatures img{background:white}.muted{color:#666;font-size:12px}@media print{body{background:white}.paper{box-shadow:none;margin:0;padding:0;border-radius:0}.actions{display:none}.photos{grid-template-columns:repeat(2,1fr)}.photos img{height:235px}.report-section{break-inside:avoid}}
+    @page{size:letter;margin:14mm}*{box-sizing:border-box}body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#20242a;background:#f2f4f7}.paper{max-width:980px;margin:18px auto;background:white;padding:26px;box-shadow:0 10px 35px #0002;border-radius:18px}.top{display:flex;align-items:center;gap:18px;border-bottom:5px solid #ff6a00;padding-bottom:14px;margin-bottom:16px}.logo{width:210px;max-height:80px;object-fit:contain;border:2px solid #ff6a00;border-radius:12px;padding:6px}.title h1{margin:0;font-size:28px;color:#111}.title p{margin:4px 0;color:#666}.badge{display:inline-block;border-radius:999px;padding:7px 12px;font-weight:900;background:#111;color:white}.badge.ok{background:#0f8a4b}.badge.warn{background:#b7791f}.badge.bad{background:#b42318}.actions{margin:0 auto 10px;max-width:980px;text-align:right}.btn{background:#ff6a00;color:white;border:0;border-radius:10px;padding:10px 14px;font-weight:bold;cursor:pointer}.btn-dark{background:#111}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.box{border:1px solid #d8dde3;border-radius:12px;padding:10px;background:#fbfcfd}.summary{margin:14px 0 18px}.report-section{page-break-inside:avoid;border:1px solid #d8dde3;border-radius:16px;margin-top:18px;padding:16px;background:#fff}.report-section.danger{border-color:#ffb3aa}.section-title{display:flex;justify-content:space-between;gap:10px;align-items:center;border-bottom:2px solid #eef1f4;margin-bottom:12px}.section-title h2{margin:0 0 8px}.section-title span{font-weight:700;color:#666}table{width:100%;border-collapse:collapse;margin:12px 0}td,th{border:1px solid #d8dde3;padding:8px;text-align:left;font-size:13px}th{background:#111;color:#fff}.photos{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}.photos figure{margin:0;border:1px solid #d8dde3;border-radius:14px;padding:8px;background:#fafafa;page-break-inside:avoid}.photos figure.img-error:before{content:'No se pudo cargar esta foto. Abre el enlace de la ruta o revisa que exista el archivo en public/uploads.';display:block;background:#fff2f2;border:1px solid #ffb3aa;color:#9b1c1c;border-radius:10px;padding:8px;margin-bottom:6px;font-weight:700}.photos img{width:100%;height:260px;object-fit:contain;background:white;border-radius:10px;border:1px solid #ddd}.photos a{display:block}.photos figcaption{font-size:12px;color:#555;margin-top:6px}.photos small{word-break:break-all;color:#777}.empty-photos{border:1px dashed #bbb;border-radius:12px;padding:14px;color:#666;background:#fafafa}.pdf-fuel{border:1px solid #d8dde3;border-radius:14px;padding:8px;text-align:center;max-width:360px;margin:12px 0;background:#fbfcfd}.pdf-fuel h3{margin:0 0 6px;color:#111}.signatures img{background:white}.muted{color:#666;font-size:12px}@media print{body{background:white}.paper{box-shadow:none;margin:0;padding:0;border-radius:0}.actions{display:none}.photos{grid-template-columns:repeat(2,1fr)}.photos img{height:235px}.report-section{break-inside:avoid}}
   </style></head><body><div class="actions"><button class="btn" onclick="window.print()">Imprimir / Guardar como PDF</button> <button class="btn btn-dark" onclick="const c=prompt('Correo destino:'); if(c){location.href='mailto:'+encodeURIComponent(c)+'?subject='+encodeURIComponent('Reporte préstamo de unidad ${escHtml(folio)}')+'&body='+encodeURIComponent('Adjunto/comparto reporte de préstamo de unidad ${escHtml(folio)}. Guarda este reporte como PDF desde el navegador para anexarlo al correo.')}" >Correo opcional</button></div><main class="paper"><header class="top"><img class="logo" src="/logo-interbandas.png" alt="Interbandas IBS"><div class="title"><h1>Reporte de entrega / recepción de unidad</h1><p>Folio: <b>${escHtml(folio)}</b> · Generado: ${new Date().toLocaleString('es-MX')}</p><span class="badge ${licenciaClass(licenciaEstado)}">Licencia: ${escHtml(licenciaEstado || 'SIN ESTADO')}</span></div></header><section class="summary"><div class="grid"><div class="box"><b>Tipo salida</b><br>${escHtml(loan.tipo_salida)}</div><div class="box"><b>Estado préstamo</b><br>${escHtml(loan.estado)}</div><div class="box"><b>Empresa / cliente</b><br>${escHtml(loan.empresa)}</div><div class="box"><b>OP / Servicio</b><br>${escHtml(loan.op)}</div><div class="box"><b>Técnico/usuario recibe</b><br>${escHtml(loan.tecnico_nombre)} ${escHtml(loan.tecnico_numero)}</div><div class="box"><b>Cantidad técnicos</b><br>${escHtml(loan.cantidad_tecnicos)}</div><div class="box"><b>Licencia</b><br>${escHtml(loan.licencia_numero)}<br><small>Vigencia: ${escHtml(loan.licencia_vigencia || '')}</small></div><div class="box"><b>Unidad asignada / activo</b><br>${escHtml(loan.unidad_asignada || 'SIN ASIGNAR')}</div><div class="box"><b>Remolque</b><br>${escHtml(loan.lleva_remolque)} ${escHtml(loan.datos_remolque)}</div><div class="box"><b>Sucursal / área</b><br>${escHtml(loan.sucursal)} · ${escHtml(loan.area)}</div></div></section>${ch.rows.map(renderChecklist).join('')}${pe.rows.map(renderPercance).join('')}</main></body></html>`);
 });
 
