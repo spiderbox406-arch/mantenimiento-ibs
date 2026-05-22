@@ -702,45 +702,8 @@ app.get('/api/health', async (req,res)=>{
 });
 // AUTH CONTROLLER TEST
 app.get('/api/me', (req,res)=> res.json({user:req.session.user || null}));
-app.post('/api/login', async (req,res)=>{
-  const username = clean(req.body.username).toLowerCase();
-  const password = String(req.body.password || '');
-  const sucursalLogin = canonicalSucursal(req.body.sucursal || req.body.loginSucursal || '');
-
-  if(!username || !password) return res.status(400).json({error:'Usuario y contraseña son obligatorios.'});
-
-  const r = await pool.query("select * from users where lower(username)=lower($1) order by case when role='admin' then 0 else 1 end, sucursal", [username]);
-  let candidates = r.rows || [];
-
-  if(!candidates.length) return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
-
-  // Admin puede entrar global. Usuarios repetidos deben seleccionar la sucursal correcta.
-  if(sucursalLogin){
-    candidates = candidates.filter(u => String(u.role||'').toLowerCase()==='admin' || sameKey(u.sucursal, sucursalLogin));
-  }else{
-    const nonAdmin = candidates.filter(u => String(u.role||'').toLowerCase() !== 'admin');
-    if(nonAdmin.length > 1){
-      return res.status(400).json({error:'Selecciona la sucursal para este usuario.'});
-    }
-  }
-
-  const user = candidates[0];
-  if(!user) return res.status(401).json({error:'Usuario, contraseña o sucursal incorrectos.'});
-  if(user.status !== 'activo') return res.status(403).json({error:'Usuario inactivo. Contacta al administrador.'});
-  if(user.locked_until && new Date(user.locked_until) > new Date()) return res.status(423).json({error:'Usuario bloqueado temporalmente por intentos fallidos.'});
-
-  const ok = await bcrypt.compare(password, user.password_hash);
-  if(!ok){
-    const attempts = (user.failed_login_attempts || 0) + 1;
-    const lockedUntil = attempts >= 5 ? new Date(Date.now() + 15*60*1000) : null;
-    await pool.query('update users set failed_login_attempts=$1, locked_until=$2 where id=$3', [attempts, lockedUntil, user.id]);
-    return res.status(401).json({error:'Usuario o contraseña incorrectos.'});
-  }
-
-  await pool.query('update users set failed_login_attempts=0, locked_until=null where id=$1', [user.id]);
-  req.session.user = publicUser(user);
-  await logAction(user.id, 'login', {username, sucursal:sucursalLogin || user.sucursal || ''});
-  res.json({user:req.session.user});
+app.post('/api/login', async (req, res) => {
+  return authController.login(req, res, pool, clean, canonicalSucursal, publicUser, bcrypt);
 });
 app.post('/api/logout', requireLogin, async (req,res)=>{ const uid=req.session.user.id; req.session.destroy(()=>{}); await logAction(uid,'logout'); res.json({ok:true}); });
 app.post('/api/change-password', requireLogin, async (req,res)=>{
