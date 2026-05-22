@@ -1,3 +1,4 @@
+const authController = require('./controllers/authController');
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
@@ -699,7 +700,7 @@ app.get('/api/health', async (req,res)=>{
     res.status(500).json({ok:false, error:e.message});
   }
 });
-
+// AUTH CONTROLLER TEST
 app.get('/api/me', (req,res)=> res.json({user:req.session.user || null}));
 app.post('/api/login', async (req,res)=>{
   const username = clean(req.body.username).toLowerCase();
